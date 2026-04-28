@@ -1,4 +1,4 @@
-# PaperPulse 📄
+# PaperPulse
 
 PaperPulse is a daily medical literature digest tool. It automatically fetches recent papers from leading digital medicine journals, enriches them with community impact data, and uses an LLM to surface the 3 most relevant papers of the day based on your interest profile.
 
@@ -7,7 +7,6 @@ Designed for clinicians and researchers who want to stay current without drownin
 ## Features
 
 - **Automated fetching** — queries PubMed daily for papers from a curated journal whitelist
-- **Impact enrichment** — adds Altmetric scores to surface papers generating real-world discussion
 - **LLM-powered selection** — picks the top 3 papers most relevant to your interest profile
 - **Lightweight web interface** — served as an HTMX-powered HTML fragment, easy to embed in any dashboard
 
@@ -24,8 +23,7 @@ Designed for clinicians and researchers who want to stay current without drownin
 paperpulse/
 ├── paperpulse/
 │   ├── fetchers/
-│   │   ├── pubmed.py        # PubMed E-utilities API client
-│   │   └── altmetric.py     # Altmetric API client
+│   │   └── pubmed.py        # PubMed E-utilities API client
 │   ├── scoring/
 │   │   └── llm.py           # LLM-based paper selection
 │   ├── db.py                # Database models and queries
