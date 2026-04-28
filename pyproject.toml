@@ -1,0 +1,20 @@
+[project]
+name = "paperpulse"
+version = "0.1.0"
+description = "A daily medical literature digest for your dashboard"
+authors = [
+    {name = "Engin Boz"}
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/enginboz/paperpulse"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = []
