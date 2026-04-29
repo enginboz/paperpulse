@@ -16,6 +16,8 @@ from time import sleep
 import requests
 from dotenv import load_dotenv
 
+from paperpulse.models import Paper
+
 load_dotenv()
 
 # ---------------------------------------------------------------------------
@@ -121,7 +123,7 @@ def _search(query: str, max_results: int) -> list[str]:
     return ids
 
 
-def _fetch_details(pubmed_ids: list[str]) -> list[dict]:
+def _fetch_details(pubmed_ids: list[str]) -> list[Paper]:
     """
     Fetch full article details for a list of PMIDs via efetch
     and return parsed paper dicts.
@@ -141,9 +143,9 @@ def _fetch_details(pubmed_ids: list[str]) -> list[dict]:
     return _parse_xml(response.text)
 
 
-def _parse_xml(xml_text: str) -> list[dict]:
+def _parse_xml(xml_text: str) -> list[Paper]:
     """
-    Parse PubMed XML response into a list of structured paper dicts.
+    Parse PubMed XML response into a list of Paper objects.
     Papers without an abstract are skipped (editorials, letters, etc.).
     """
     root = ET.fromstring(xml_text)
@@ -190,23 +192,23 @@ def _parse_xml(xml_text: str) -> list[dict]:
             pmid_el = article.find(".//PMID")
             pmid = pmid_el.text.strip() if pmid_el is not None else ""
 
-            # DOI — needed for Altmetric enrichment later
+            # DOI
             doi = ""
             for id_el in article.findall(".//ArticleId"):
                 if id_el.get("IdType") == "doi":
                     doi = id_el.text.strip()
                     break
 
-            papers.append({
-                "pmid": pmid,
-                "title": title,
-                "abstract": abstract,
-                "journal": journal,
-                "pub_date": pub_date,
-                "authors": authors,
-                "doi": doi,
-                "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else "",
-            })
+            papers.append(Paper(
+                pmid=pmid,
+                title=title,
+                abstract=abstract,
+                journal=journal,
+                pub_date=pub_date,
+                authors=authors,
+                doi=doi,
+                url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else "",
+            ))
 
         except Exception as e:
             # Skip malformed entries without crashing the whole fetch
@@ -220,7 +222,7 @@ def _parse_xml(xml_text: str) -> list[dict]:
 # Public API
 # ---------------------------------------------------------------------------
 
-def fetch_recent_papers(days: int = 7, max_results: int = 100) -> list[dict]:
+def fetch_recent_papers(days: int = 7, max_results: int = 100) -> list[Paper]:
     """
     Fetch recent papers from whitelisted journals.
 
@@ -233,8 +235,7 @@ def fetch_recent_papers(days: int = 7, max_results: int = 100) -> list[dict]:
         max_results: Maximum number of PMIDs to fetch per query (default: 100).
 
     Returns:
-        List of paper dicts with keys:
-        pmid, title, abstract, journal, pub_date, authors, doi, url
+        List of Paper objects.
     """
     if not PUBMED_EMAIL:
         print("Warning: PUBMED_EMAIL not set in .env — PubMed requests an email for polite usage.")

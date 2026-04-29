@@ -6,20 +6,22 @@ instance during testing. SQLAlchemy's ORM works identically across both.
 """
 
 import pytest
-from datetime import date
+from datetime import date, timedelta
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from paperpulse.db import (
     Base,
-    Paper,
-    DailyDigest,
-    DigestPaper,
-    upsert_paper,
+    DBPaper,
+    DBDailyDigest,
+    DBDigestPaper,
+    _upsert_paper,
     save_digest,
     get_latest_digest,
     get_digest_for_date,
+    get_recent_selected_pmids,
 )
+from paperpulse.models import Paper, Digest
 
 
 # ---------------------------------------------------------------------------
@@ -52,77 +54,74 @@ def patch_engine(engine, monkeypatch):
     monkeypatch.setattr(db_module, "engine", engine)
 
 
-def make_paper_data(pmid: str = "12345678", title: str = "Test Paper") -> dict:
-    """Return a minimal paper dict for testing."""
-    return {
-        "pmid": pmid,
-        "title": title,
-        "abstract": "This is a test abstract.",
-        "journal": "npj Digital Medicine",
-        "pub_date": "2026 Apr 21",
-        "authors": ["John Smith", "Jane Doe"],
-        "doi": f"10.1038/test-{pmid}",
-        "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
-        "reason": "Relevant to clinical AI decision support.",
-    }
+def make_paper(pmid: str = "12345678", title: str = "Test Paper") -> Paper:
+    """Return a minimal Paper domain object for testing."""
+    return Paper(
+        pmid=pmid,
+        title=title,
+        abstract="This is a test abstract.",
+        journal="npj Digital Medicine",
+        pub_date="2026 Apr 21",
+        authors=["John Smith", "Jane Doe"],
+        doi=f"10.1038/test-{pmid}",
+        url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+        reason="Relevant to clinical AI decision support.",
+    )
 
 
-def make_digest_papers(n: int = 3) -> list[dict]:
-    """Return a list of n paper dicts for a digest."""
-    return [
-        make_paper_data(pmid=str(i), title=f"Paper {i}")
-        for i in range(1, n + 1)
-    ]
+def make_digest(digest_date: date = None, n: int = 3) -> Digest:
+    """Return a Digest with n papers for testing."""
+    if digest_date is None:
+        digest_date = date(2026, 4, 28)
+    papers = [make_paper(pmid=str(i), title=f"Paper {i}") for i in range(1, n + 1)]
+    return Digest(digest_date=digest_date, papers=papers)
 
 
 # ---------------------------------------------------------------------------
-# upsert_paper tests
+# _upsert_paper tests
 # ---------------------------------------------------------------------------
 
 def test_upsert_paper_creates_new_paper(session):
-    """Should create a new paper if PMID doesn't exist."""
-    data = make_paper_data()
-    paper = upsert_paper(session, data)
+    """Should create a new DBPaper if PMID doesn't exist."""
+    paper = make_paper()
+    db_paper = _upsert_paper(session, paper)
     session.flush()
 
-    assert paper.pmid == "12345678"
-    assert paper.title == "Test Paper"
-    assert paper.journal == "npj Digital Medicine"
+    assert db_paper.pmid == "12345678"
+    assert db_paper.title == "Test Paper"
+    assert db_paper.journal == "npj Digital Medicine"
 
 
 def test_upsert_paper_returns_existing_paper(session):
-    """Should return the existing paper if PMID already exists."""
-    data = make_paper_data()
-    paper1 = upsert_paper(session, data)
+    """Should return the existing DBPaper if PMID already exists."""
+    paper = make_paper()
+    db_paper1 = _upsert_paper(session, paper)
     session.flush()
 
-    paper2 = upsert_paper(session, data)
+    db_paper2 = _upsert_paper(session, paper)
     session.flush()
 
-    assert paper1.id == paper2.id
-    assert session.query(Paper).count() == 1
+    assert db_paper1.id == db_paper2.id
+    assert session.query(DBPaper).count() == 1
 
 
 def test_upsert_paper_joins_authors(session):
     """Authors list should be stored as a comma-separated string."""
-    data = make_paper_data()
-    paper = upsert_paper(session, data)
+    paper = make_paper()
+    db_paper = _upsert_paper(session, paper)
     session.flush()
 
-    assert "John Smith" in paper.authors
-    assert "Jane Doe" in paper.authors
+    assert "John Smith" in db_paper.authors
+    assert "Jane Doe" in db_paper.authors
 
 
 def test_upsert_different_pmids_creates_two_papers(session):
     """Two papers with different PMIDs should both be stored."""
-    data1 = make_paper_data(pmid="11111111")
-    data2 = make_paper_data(pmid="22222222")
-
-    upsert_paper(session, data1)
-    upsert_paper(session, data2)
+    _upsert_paper(session, make_paper(pmid="11111111"))
+    _upsert_paper(session, make_paper(pmid="22222222"))
     session.flush()
 
-    assert session.query(Paper).count() == 2
+    assert session.query(DBPaper).count() == 2
 
 
 # ---------------------------------------------------------------------------
@@ -130,67 +129,62 @@ def test_upsert_different_pmids_creates_two_papers(session):
 # ---------------------------------------------------------------------------
 
 def test_save_digest_creates_digest(engine):
-    """save_digest should create a DailyDigest row."""
-    papers = make_digest_papers()
-    save_digest(papers, digest_date=date(2026, 4, 28))
+    """save_digest should create a DBDailyDigest row."""
+    save_digest(make_digest())
 
     with Session(engine) as session:
-        assert session.query(DailyDigest).count() == 1
+        assert session.query(DBDailyDigest).count() == 1
 
 
 def test_save_digest_creates_three_digest_papers(engine):
-    """save_digest should create 3 DigestPaper rows."""
-    papers = make_digest_papers()
-    save_digest(papers, digest_date=date(2026, 4, 28))
+    """save_digest should create 3 DBDigestPaper rows."""
+    save_digest(make_digest(n=3))
 
     with Session(engine) as session:
-        assert session.query(DigestPaper).count() == 3
+        assert session.query(DBDigestPaper).count() == 3
 
 
 def test_save_digest_correct_date(engine):
     """Digest should be saved with the correct date."""
-    papers = make_digest_papers()
-    save_digest(papers, digest_date=date(2026, 4, 28))
+    save_digest(make_digest(digest_date=date(2026, 4, 28)))
 
     with Session(engine) as session:
-        digest = session.query(DailyDigest).first()
+        digest = session.query(DBDailyDigest).first()
         assert digest.digest_date == date(2026, 4, 28)
 
 
 def test_save_digest_correct_ranks(engine):
     """Papers should be saved with ranks 1, 2, 3."""
-    papers = make_digest_papers()
-    save_digest(papers, digest_date=date(2026, 4, 28))
+    save_digest(make_digest(n=3))
 
     with Session(engine) as session:
-        ranks = [dp.rank for dp in session.query(DigestPaper).all()]
+        ranks = [dp.rank for dp in session.query(DBDigestPaper).all()]
         assert sorted(ranks) == [1, 2, 3]
 
 
 def test_save_digest_replaces_existing(engine):
     """Saving a second digest for the same date should replace the first."""
-    papers1 = make_digest_papers()
-    save_digest(papers1, digest_date=date(2026, 4, 28))
-
-    papers2 = [make_paper_data(pmid="99", title="New Paper")]
-    save_digest(papers2, digest_date=date(2026, 4, 28))
+    save_digest(make_digest(digest_date=date(2026, 4, 28), n=3))
+    save_digest(Digest(
+        digest_date=date(2026, 4, 28),
+        papers=[make_paper(pmid="99", title="New Paper")]
+    ))
 
     with Session(engine) as session:
-        assert session.query(DailyDigest).count() == 1
-        assert session.query(DigestPaper).count() == 1
+        assert session.query(DBDailyDigest).count() == 1
+        assert session.query(DBDigestPaper).count() == 1
 
 
 def test_save_digest_deduplicates_papers(engine):
     """Same paper appearing in two digests should only be stored once."""
-    papers = make_digest_papers()
-    save_digest(papers, digest_date=date(2026, 4, 27))
-    save_digest(papers, digest_date=date(2026, 4, 28))
+    digest1 = make_digest(digest_date=date(2026, 4, 27), n=3)
+    digest2 = make_digest(digest_date=date(2026, 4, 28), n=3)
+    save_digest(digest1)
+    save_digest(digest2)
 
     with Session(engine) as session:
-        # 3 unique papers, not 6
-        assert session.query(Paper).count() == 3
-        # But 6 digest_papers rows (3 per digest)
-        assert session.query(DigestPaper).count() == 6
+        assert session.query(DBPaper).count() == 3
+        assert session.query(DBDigestPaper).count() == 6
 
 
 # ---------------------------------------------------------------------------
@@ -203,46 +197,50 @@ def test_get_latest_digest_returns_none_when_empty():
     assert result is None
 
 
+def test_get_latest_digest_returns_digest(engine):
+    """Should return a Digest object."""
+    save_digest(make_digest(n=3))
+    result = get_latest_digest()
+    assert isinstance(result, Digest)
+
+
 def test_get_latest_digest_returns_three_papers(engine):
     """Should return exactly 3 papers."""
-    papers = make_digest_papers()
-    save_digest(papers, digest_date=date(2026, 4, 28))
-
+    save_digest(make_digest(n=3))
     result = get_latest_digest()
-    assert len(result) == 3
+    assert len(result.papers) == 3
 
 
 def test_get_latest_digest_returns_most_recent(engine):
     """Should return the most recent digest, not an older one."""
-    old_papers = [make_paper_data(pmid="1", title="Old Paper")]
-    new_papers = [make_paper_data(pmid="2", title="New Paper")]
-
-    save_digest(old_papers, digest_date=date(2026, 4, 27))
-    save_digest(new_papers, digest_date=date(2026, 4, 28))
+    old_digest = Digest(
+        digest_date=date(2026, 4, 27),
+        papers=[make_paper(pmid="1", title="Old Paper")]
+    )
+    new_digest = Digest(
+        digest_date=date(2026, 4, 28),
+        papers=[make_paper(pmid="2", title="New Paper")]
+    )
+    save_digest(old_digest)
+    save_digest(new_digest)
 
     result = get_latest_digest()
-    assert result[0]["title"] == "New Paper"
+    assert result.papers[0].title == "New Paper"
 
 
-def test_get_latest_digest_has_reason(engine):
+def test_get_latest_digest_papers_have_reason(engine):
     """Each paper in the digest should have a reason field."""
-    papers = make_digest_papers()
-    save_digest(papers, digest_date=date(2026, 4, 28))
-
+    save_digest(make_digest(n=3))
     result = get_latest_digest()
-    for paper in result:
-        assert "reason" in paper
-        assert len(paper["reason"]) > 0
+    for paper in result.papers:
+        assert paper.reason != ""
 
 
-def test_get_latest_digest_has_digest_date(engine):
-    """Each paper should include the digest date."""
-    papers = make_digest_papers()
-    save_digest(papers, digest_date=date(2026, 4, 28))
-
+def test_get_latest_digest_correct_date(engine):
+    """Digest should have the correct date."""
+    save_digest(make_digest(digest_date=date(2026, 4, 28)))
     result = get_latest_digest()
-    for paper in result:
-        assert paper["digest_date"] == "2026-04-28"
+    assert result.digest_date == date(2026, 4, 28)
 
 
 # ---------------------------------------------------------------------------
@@ -251,10 +249,7 @@ def test_get_latest_digest_has_digest_date(engine):
 
 def test_get_recent_selected_pmids_returns_correct_pmids(engine):
     """Should return PMIDs of papers selected in the last 7 days."""
-    from paperpulse.db import get_recent_selected_pmids
-    papers = make_digest_papers()
-    save_digest(papers, digest_date=date.today())
-
+    save_digest(make_digest(digest_date=date.today(), n=3))
     pmids = get_recent_selected_pmids(days=7)
     assert "1" in pmids
     assert "2" in pmids
@@ -263,20 +258,17 @@ def test_get_recent_selected_pmids_returns_correct_pmids(engine):
 
 def test_get_recent_selected_pmids_excludes_old_digests(engine):
     """Should not return PMIDs from digests older than the cutoff."""
-    from paperpulse.db import get_recent_selected_pmids
-    from datetime import timedelta
-
-    old_papers = [make_paper_data(pmid="99", title="Old Paper")]
-    old_date = date.today() - timedelta(days=8)
-    save_digest(old_papers, digest_date=old_date)
-
+    old_digest = Digest(
+        digest_date=date.today() - timedelta(days=8),
+        papers=[make_paper(pmid="99", title="Old Paper")]
+    )
+    save_digest(old_digest)
     pmids = get_recent_selected_pmids(days=7)
     assert "99" not in pmids
 
 
 def test_get_recent_selected_pmids_returns_empty_when_no_digests():
     """Should return an empty set if no digests exist."""
-    from paperpulse.db import get_recent_selected_pmids
     pmids = get_recent_selected_pmids(days=7)
     assert pmids == set()
 
@@ -287,13 +279,12 @@ def test_get_recent_selected_pmids_returns_empty_when_no_digests():
 
 def test_get_digest_for_date_returns_correct_digest(engine):
     """Should return the digest for the specified date."""
-    papers = make_digest_papers()
-    save_digest(papers, digest_date=date(2026, 4, 27))
-    save_digest(papers, digest_date=date(2026, 4, 28))
+    save_digest(make_digest(digest_date=date(2026, 4, 27)))
+    save_digest(make_digest(digest_date=date(2026, 4, 28)))
 
     result = get_digest_for_date(date(2026, 4, 27))
     assert result is not None
-    assert result[0]["digest_date"] == "2026-04-27"
+    assert result.digest_date == date(2026, 4, 27)
 
 
 def test_get_digest_for_date_returns_none_for_missing_date(engine):

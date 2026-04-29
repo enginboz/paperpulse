@@ -158,39 +158,39 @@ def test_parse_xml_returns_correct_number_of_papers():
 
 def test_parse_xml_correct_title():
     papers = _parse_xml(SAMPLE_XML)
-    assert papers[0]["title"] == "AI-assisted diagnosis in clinical practice."
+    assert papers[0].title == "AI-assisted diagnosis in clinical practice."
 
 
 def test_parse_xml_correct_pmid():
     papers = _parse_xml(SAMPLE_XML)
-    assert papers[0]["pmid"] == "12345678"
+    assert papers[0].pmid == "12345678"
 
 
 def test_parse_xml_correct_doi():
     papers = _parse_xml(SAMPLE_XML)
-    assert papers[0]["doi"] == "10.1038/s41746-026-00001-1"
+    assert papers[0].doi == "10.1038/s41746-026-00001-1"
 
 
 def test_parse_xml_correct_authors():
     papers = _parse_xml(SAMPLE_XML)
-    assert "John Smith" in papers[0]["authors"]
-    assert "Jane Doe" in papers[0]["authors"]
+    assert "John Smith" in papers[0].authors
+    assert "Jane Doe" in papers[0].authors
 
 
 def test_parse_xml_correct_journal():
     papers = _parse_xml(SAMPLE_XML)
-    assert papers[0]["journal"] == "npj Digital Medicine"
+    assert papers[0].journal == "npj Digital Medicine"
 
 
 def test_parse_xml_correct_url():
     papers = _parse_xml(SAMPLE_XML)
-    assert papers[0]["url"] == "https://pubmed.ncbi.nlm.nih.gov/12345678/"
+    assert papers[0].url == "https://pubmed.ncbi.nlm.nih.gov/12345678/"
 
 
 def test_parse_xml_skips_papers_without_abstract():
     """Papers without an abstract should be silently skipped."""
     papers = _parse_xml(SAMPLE_XML)
-    pmids = [p["pmid"] for p in papers]
+    pmids = [p.pmid for p in papers]
     assert "99999999" not in pmids
 
 

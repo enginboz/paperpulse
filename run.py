@@ -17,6 +17,7 @@ from datetime import date
 
 from paperpulse.db import get_recent_selected_pmids, save_digest
 from paperpulse.fetchers.pubmed import fetch_recent_papers
+from paperpulse.models import Digest
 from paperpulse.scoring.llm import select_top_papers
 
 
@@ -35,7 +36,7 @@ def run():
 
     if recent_pmids:
         before = len(papers)
-        papers = [p for p in papers if p["pmid"] not in recent_pmids]
+        papers = [p for p in papers if p.pmid not in recent_pmids]
         print(f"Excluded {before - len(papers)} recently shown papers. {len(papers)} remaining.\n")
 
     if not papers:
@@ -50,15 +51,16 @@ def run():
         sys.exit(1)
 
     # Step 4 — save to database
-    save_digest(top3)
+    digest = Digest(digest_date=date.today(), papers=top3)
+    save_digest(digest)
 
     # Step 5 — print summary
     print("\n=== Today's top papers ===")
-    for rank, p in enumerate(top3, 1):
-        print(f"\n#{rank} {p['journal']}")
-        print(f"   {p['title']}")
-        print(f"   Why: {p['reason']}")
-        print(f"   {p['url']}")
+    for i, p in enumerate(top3, 1):
+        print(f"\n#{i} {p.journal}")
+        print(f"   {p.title}")
+        print(f"   Why: {p.reason}")
+        print(f"   {p.url}")
 
     print("\n=== Done ===")
 

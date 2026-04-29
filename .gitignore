@@ -33,3 +33,5 @@ logs/
 
 # Database
 *.sqlite3
+
+NOTES.md

@@ -12,7 +12,7 @@ Endpoints:
 from datetime import date
 
 from flask import Flask, render_template_string
-from paperpulse.db import get_latest_digest
+from paperpulse.db import get_latest_digest, get_digest_for_date
 
 app = Flask(__name__)
 
@@ -23,7 +23,7 @@ app = Flask(__name__)
 WIDGET_TEMPLATE = """
 <div id="papers-widget"
      hx-get="/widgets/papers"
-     hx-trigger="every 6h"
+     hx-trigger="every 21600s"
      hx-swap="outerHTML">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600&family=JetBrains+Mono:wght@300;400&display=swap');
@@ -170,9 +170,16 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
 
 def _get_digest_context() -> dict:
     """Fetch the latest digest from the database and return template context."""
-    papers = get_latest_digest()
-    digest_date = papers[0]["digest_date"] if papers else date.today().isoformat()
-    return {"papers": papers or [], "digest_date": digest_date}
+    digest = get_latest_digest()
+    if digest:
+        return {
+            "papers": digest.papers,
+            "digest_date": digest.digest_date.isoformat(),
+        }
+    return {
+        "papers": [],
+        "digest_date": date.today().isoformat(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +194,28 @@ def widget_papers():
     """
     context = _get_digest_context()
     return render_template_string(WIDGET_TEMPLATE, **context)
+
+
+@app.route("/digest/<date_str>")
+def digest_for_date(date_str: str):
+    """
+    View the digest for a specific date.
+    Usage: /digest/2026-04-28
+    """
+    try:
+        target = date.fromisoformat(date_str)
+    except ValueError:
+        return f"Invalid date format: '{date_str}'. Use YYYY-MM-DD.", 400
+
+    digest = get_digest_for_date(target)
+    if not digest:
+        return f"No digest found for {date_str}.", 404
+
+    widget_html = render_template_string(WIDGET_TEMPLATE,
+        papers=digest.papers,
+        digest_date=digest.digest_date.isoformat(),
+    )
+    return PAGE_TEMPLATE.format(widget_html=widget_html)
 
 
 @app.route("/")

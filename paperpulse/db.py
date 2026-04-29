@@ -1,32 +1,35 @@
 """
 Database module.
 
-Defines the SQLAlchemy models and database helper functions for PaperPulse.
+Defines the SQLAlchemy ORM models and database helper functions for PaperPulse.
 
 Schema:
   - papers         — stores all fetched papers, deduplicated by PMID
   - daily_digests  — one row per day, tracks when a digest was created
   - digest_papers  — junction table linking a digest to its 3 selected papers
                      with the LLM's relevance reason for each
+
+SQLAlchemy ORM models are prefixed with 'DB' to avoid naming conflicts
+with the domain models in paperpulse.models.
 """
 
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from dotenv import load_dotenv
 from sqlalchemy import (
     Column,
     Date,
     DateTime,
-    Float,
     ForeignKey,
     Integer,
     String,
     Text,
     create_engine,
-    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, relationship
+
+from paperpulse.models import Digest, Paper
 
 load_dotenv()
 
@@ -43,16 +46,16 @@ engine = create_engine(DATABASE_URL)
 
 
 # ---------------------------------------------------------------------------
-# Models
+# ORM models (prefixed with DB to avoid conflict with domain models)
 # ---------------------------------------------------------------------------
 
 class Base(DeclarativeBase):
     pass
 
 
-class Paper(Base):
+class DBPaper(Base):
     """
-    A paper fetched from PubMed.
+    ORM model for a paper stored in the database.
     Deduplicated by PMID — each paper is stored only once.
     """
     __tablename__ = "papers"
@@ -66,56 +69,53 @@ class Paper(Base):
     authors = Column(Text)           # Stored as comma-separated string
     doi = Column(String(255))
     url = Column(String(500))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
-    # Relationship back to digest entries
-    digest_entries = relationship("DigestPaper", back_populates="paper")
+    digest_entries = relationship("DBDigestPaper", back_populates="paper")
 
     def __repr__(self):
-        return f"<Paper pmid={self.pmid} title={self.title[:50]}>"
+        return f"<DBPaper pmid={self.pmid} title={self.title[:50]}>"
 
 
-class DailyDigest(Base):
+class DBDailyDigest(Base):
     """
-    One digest per day — tracks when the daily pipeline ran
-    and links to the 3 selected papers.
+    ORM model for a daily digest.
+    One row per day — tracks when the daily pipeline ran.
     """
     __tablename__ = "daily_digests"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     digest_date = Column(Date, unique=True, nullable=False, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
-    # Relationship to the 3 selected papers
     papers = relationship(
-        "DigestPaper",
+        "DBDigestPaper",
         back_populates="digest",
-        order_by="DigestPaper.rank",
+        order_by="DBDigestPaper.rank",
         cascade="all, delete-orphan",
     )
 
     def __repr__(self):
-        return f"<DailyDigest date={self.digest_date}>"
+        return f"<DBDailyDigest date={self.digest_date}>"
 
 
-class DigestPaper(Base):
+class DBDigestPaper(Base):
     """
-    Junction table linking a daily digest to one of its selected papers.
-    Stores the LLM's relevance reason and the paper's rank (1, 2, or 3).
+    ORM model for the junction table linking a digest to a selected paper.
     """
     __tablename__ = "digest_papers"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     digest_id = Column(Integer, ForeignKey("daily_digests.id"), nullable=False)
     paper_id = Column(Integer, ForeignKey("papers.id"), nullable=False)
-    rank = Column(Integer, nullable=False)       # 1, 2, or 3
-    reason = Column(Text, nullable=False)        # LLM's relevance reason
+    rank = Column(Integer, nullable=False)
+    reason = Column(Text, nullable=False)
 
-    digest = relationship("DailyDigest", back_populates="papers")
-    paper = relationship("Paper", back_populates="digest_entries")
+    digest = relationship("DBDailyDigest", back_populates="papers")
+    paper = relationship("DBPaper", back_populates="digest_entries")
 
     def __repr__(self):
-        return f"<DigestPaper digest={self.digest_id} rank={self.rank}>"
+        return f"<DBDigestPaper digest={self.digest_id} rank={self.rank}>"
 
 
 # ---------------------------------------------------------------------------
@@ -131,108 +131,103 @@ def init_db() -> None:
     print("Database tables created.")
 
 
-def upsert_paper(session: Session, paper_data: dict) -> Paper:
+def _upsert_paper(session: Session, paper: Paper) -> DBPaper:
     """
-    Insert a paper if it doesn't exist, or return the existing one.
-    Deduplicates by PMID.
+    Insert a Paper into the database if it doesn't exist,
+    or return the existing DBPaper. Deduplicates by PMID.
     """
-    existing = session.query(Paper).filter_by(pmid=paper_data["pmid"]).first()
+    existing = session.query(DBPaper).filter_by(pmid=paper.pmid).first()
     if existing:
         return existing
 
-    paper = Paper(
-        pmid=paper_data["pmid"],
-        title=paper_data["title"],
-        abstract=paper_data["abstract"],
-        journal=paper_data["journal"],
-        pub_date=paper_data.get("pub_date", ""),
-        authors=", ".join(paper_data.get("authors", [])),
-        doi=paper_data.get("doi", ""),
-        url=paper_data.get("url", ""),
+    db_paper = DBPaper(
+        pmid=paper.pmid,
+        title=paper.title,
+        abstract=paper.abstract,
+        journal=paper.journal,
+        pub_date=paper.pub_date,
+        authors=paper.authors_str(),
+        doi=paper.doi,
+        url=paper.url,
     )
-    session.add(paper)
-    return paper
+    session.add(db_paper)
+    return db_paper
 
 
-def save_digest(selected_papers: list[dict], digest_date: date = None) -> None:
+def save_digest(digest: Digest) -> None:
     """
-    Save a daily digest and its 3 selected papers to the database.
-
+    Save a Digest and its selected papers to the database.
     If a digest already exists for the given date, it is replaced.
 
     Args:
-        selected_papers: List of 3 paper dicts enriched with a 'reason' field.
-        digest_date: The date for the digest (default: today).
+        digest: A Digest object containing the date and selected papers.
     """
-    if digest_date is None:
-        digest_date = date.today()
-
     with Session(engine) as session:
         # Remove existing digest for this date if it exists
-        existing = session.query(DailyDigest).filter_by(
-            digest_date=digest_date
+        existing = session.query(DBDailyDigest).filter_by(
+            digest_date=digest.digest_date
         ).first()
         if existing:
-            print(f"Replacing existing digest for {digest_date}.")
+            print(f"Replacing existing digest for {digest.digest_date}.")
             session.delete(existing)
             session.flush()
 
         # Create the new digest
-        digest = DailyDigest(digest_date=digest_date)
-        session.add(digest)
-        session.flush()  # Get the digest ID before adding papers
+        db_digest = DBDailyDigest(digest_date=digest.digest_date)
+        session.add(db_digest)
+        session.flush()
 
         # Upsert each paper and link to the digest
-        for rank, paper_data in enumerate(selected_papers, 1):
-            paper = upsert_paper(session, paper_data)
-            session.flush()  # Get the paper ID
+        for rank, paper in enumerate(digest.papers, 1):
+            db_paper = _upsert_paper(session, paper)
+            session.flush()
 
-            digest_paper = DigestPaper(
-                digest_id=digest.id,
-                paper_id=paper.id,
+            digest_paper = DBDigestPaper(
+                digest_id=db_digest.id,
+                paper_id=db_paper.id,
                 rank=rank,
-                reason=paper_data.get("reason", ""),
+                reason=paper.reason,
             )
             session.add(digest_paper)
 
         session.commit()
-        print(f"Digest for {digest_date} saved with {len(selected_papers)} papers.")
+        print(f"Digest for {digest.digest_date} saved with {len(digest.papers)} papers.")
 
 
-def get_latest_digest() -> list[dict] | None:
+def get_latest_digest() -> Digest | None:
     """
     Retrieve the most recent daily digest from the database.
 
     Returns:
-        List of 3 paper dicts with a 'reason' field, ordered by rank.
-        Returns None if no digest exists yet.
+        A Digest object with papers ordered by rank, or None if no digest exists.
     """
     with Session(engine) as session:
-        digest = session.query(DailyDigest).order_by(
-            DailyDigest.digest_date.desc()
+        db_digest = session.query(DBDailyDigest).order_by(
+            DBDailyDigest.digest_date.desc()
         ).first()
 
-        if not digest:
+        if not db_digest:
             return None
 
-        results = []
-        for entry in digest.papers:
-            p = entry.paper
-            results.append({
-                "pmid": p.pmid,
-                "title": p.title,
-                "abstract": p.abstract,
-                "journal": p.journal,
-                "pub_date": p.pub_date,
-                "authors": p.authors,
-                "doi": p.doi,
-                "url": p.url,
-                "reason": entry.reason,
-                "rank": entry.rank,
-                "digest_date": digest.digest_date.isoformat(),
-            })
+        return _db_digest_to_digest(db_digest)
 
-        return results
+
+def get_digest_for_date(target_date: date) -> Digest | None:
+    """
+    Retrieve the digest for a specific date.
+
+    Returns:
+        A Digest object, or None if not found.
+    """
+    with Session(engine) as session:
+        db_digest = session.query(DBDailyDigest).filter_by(
+            digest_date=target_date
+        ).first()
+
+        if not db_digest:
+            return None
+
+        return _db_digest_to_digest(db_digest)
 
 
 def get_recent_selected_pmids(days: int = 7) -> set[str]:
@@ -246,12 +241,11 @@ def get_recent_selected_pmids(days: int = 7) -> set[str]:
     Returns:
         Set of PMID strings.
     """
-    from datetime import timedelta
     cutoff = date.today() - timedelta(days=days)
 
     with Session(engine) as session:
-        digests = session.query(DailyDigest).filter(
-            DailyDigest.digest_date >= cutoff
+        digests = session.query(DBDailyDigest).filter(
+            DBDailyDigest.digest_date >= cutoff
         ).all()
 
         pmids = set()
@@ -262,36 +256,27 @@ def get_recent_selected_pmids(days: int = 7) -> set[str]:
         return pmids
 
 
-def get_digest_for_date(target_date: date) -> list[dict] | None:
-    """
-    Retrieve the digest for a specific date.
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
-    Returns:
-        List of 3 paper dicts with a 'reason' field, or None if not found.
-    """
-    with Session(engine) as session:
-        digest = session.query(DailyDigest).filter_by(
-            digest_date=target_date
-        ).first()
+def _db_digest_to_digest(db_digest: DBDailyDigest) -> Digest:
+    """Convert a DBDailyDigest ORM object to a Digest domain object."""
+    papers = []
+    for entry in db_digest.papers:
+        p = entry.paper
+        papers.append(Paper(
+            pmid=p.pmid,
+            title=p.title,
+            abstract=p.abstract,
+            journal=p.journal,
+            pub_date=p.pub_date or "",
+            authors=p.authors.split(", ") if p.authors else [],
+            doi=p.doi or "",
+            url=p.url or "",
+            reason=entry.reason,
+            rank=entry.rank,
+            digest_date=db_digest.digest_date.isoformat(),
+        ))
 
-        if not digest:
-            return None
-
-        results = []
-        for entry in digest.papers:
-            p = entry.paper
-            results.append({
-                "pmid": p.pmid,
-                "title": p.title,
-                "abstract": p.abstract,
-                "journal": p.journal,
-                "pub_date": p.pub_date,
-                "authors": p.authors,
-                "doi": p.doi,
-                "url": p.url,
-                "reason": entry.reason,
-                "rank": entry.rank,
-                "digest_date": digest.digest_date.isoformat(),
-            })
-
-        return results
+    return Digest(digest_date=db_digest.digest_date, papers=papers)
