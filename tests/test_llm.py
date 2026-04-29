@@ -2,15 +2,15 @@
 Tests for the LLM scoring module.
 
 Ollama API calls are mocked — no running Ollama instance required.
+Embedding stage is also mocked to isolate LLM behavior.
 """
 
 import json
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
+from paperpulse.models import Paper
 from paperpulse.scoring.llm import (
-    _parse_indices,
     _parse_selections,
-    _stage1_shortlist,
     _stage2_select,
     select_top_papers,
     STAGE1_CANDIDATES,
@@ -21,24 +21,23 @@ from paperpulse.scoring.llm import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
-def make_papers(n: int) -> list[dict]:
-    """Generate a list of n fake paper dicts for testing."""
+def make_papers(n: int) -> list[Paper]:
+    """Generate a list of n fake Paper objects for testing."""
     return [
-        {
-            "pmid": str(i),
-            "title": f"Paper {i} about clinical AI",
-            "abstract": f"This is the abstract for paper {i}. " * 10,
-            "journal": "npj Digital Medicine",
-            "pub_date": "2026 Apr 21",
-            "authors": ["John Smith"],
-            "doi": f"10.1038/test{i}",
-            "url": f"https://pubmed.ncbi.nlm.nih.gov/{i}/",
-        }
+        Paper(
+            pmid=str(i),
+            title=f"Paper {i} about clinical AI",
+            abstract=f"This is the abstract for paper {i}. " * 10,
+            journal="npj Digital Medicine",
+            pub_date="2026 Apr 21",
+            authors=["John Smith"],
+            doi=f"10.1038/test{i}",
+            url=f"https://pubmed.ncbi.nlm.nih.gov/{i}/",
+            embedding_score=0.9 - (i * 0.01),
+        )
         for i in range(1, n + 1)
     ]
 
-
-VALID_INDICES_RESPONSE = json.dumps(list(range(1, STAGE1_CANDIDATES + 1)))
 
 VALID_SELECTIONS_RESPONSE = json.dumps([
     {"index": 1, "reason": "Relevant to clinical AI decision support."},
@@ -48,54 +47,16 @@ VALID_SELECTIONS_RESPONSE = json.dumps([
 
 
 # ---------------------------------------------------------------------------
-# _parse_indices tests
-# ---------------------------------------------------------------------------
-
-def test_parse_indices_valid():
-    """Should parse a valid JSON array of integers."""
-    response = "[1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29]"
-    indices = _parse_indices(response, max_index=52)
-    assert len(indices) == 15
-    assert 1 in indices
-    assert 29 in indices
-
-
-def test_parse_indices_strips_markdown():
-    """Should handle markdown code fences the model might add."""
-    response = "```json\n[1, 2, 3]\n```"
-    indices = _parse_indices(response, max_index=10)
-    assert indices == [1, 2, 3]
-
-
-def test_parse_indices_filters_out_of_range():
-    """Indices outside the valid range should be filtered out."""
-    response = "[1, 2, 999]"
-    indices = _parse_indices(response, max_index=52)
-    assert 999 not in indices
-    assert 1 in indices
-    assert 2 in indices
-
-
-def test_parse_indices_filters_invalid_types():
-    """Non-integer values should be filtered out."""
-    response = '[1, "two", 3]'
-    indices = _parse_indices(response, max_index=10)
-    assert "two" not in indices
-    assert 1 in indices
-    assert 3 in indices
-
-
-# ---------------------------------------------------------------------------
 # _parse_selections tests
 # ---------------------------------------------------------------------------
 
 def test_parse_selections_valid():
-    """Should parse valid selections and enrich papers with reason."""
+    """Should parse valid selections and set reason on papers."""
     papers = make_papers(5)
     selections = _parse_selections(VALID_SELECTIONS_RESPONSE, papers)
     assert len(selections) == 3
-    assert selections[0]["reason"] == "Relevant to clinical AI decision support."
-    assert selections[1]["reason"] == "Relevant to NLP on clinical notes."
+    assert selections[0].reason == "Relevant to clinical AI decision support."
+    assert selections[1].reason == "Relevant to NLP on clinical notes."
 
 
 def test_parse_selections_strips_markdown():
@@ -115,7 +76,7 @@ def test_parse_selections_skips_invalid_indices():
     ])
     selections = _parse_selections(response, papers)
     assert len(selections) == 1
-    assert selections[0]["reason"] == "Valid."
+    assert selections[0].reason == "Valid."
 
 
 def test_parse_selections_max_three():
@@ -133,34 +94,10 @@ def test_parse_selections_preserves_paper_fields():
     """Selected papers should retain all original fields plus reason."""
     papers = make_papers(3)
     selections = _parse_selections(VALID_SELECTIONS_RESPONSE, papers)
-    assert "title" in selections[0]
-    assert "abstract" in selections[0]
-    assert "journal" in selections[0]
-    assert "reason" in selections[0]
-
-
-# ---------------------------------------------------------------------------
-# _stage1_shortlist tests
-# ---------------------------------------------------------------------------
-
-@patch("paperpulse.scoring.llm._call_ollama")
-def test_stage1_returns_correct_number(mock_ollama):
-    """Stage 1 should return exactly STAGE1_CANDIDATES papers."""
-    mock_ollama.return_value = VALID_INDICES_RESPONSE
-    papers = make_papers(52)
-    candidates = _stage1_shortlist(papers)
-    assert len(candidates) == STAGE1_CANDIDATES
-
-
-@patch("paperpulse.scoring.llm._call_ollama")
-def test_stage1_fallback_on_parse_failure(mock_ollama):
-    """Stage 1 should fall back to first N papers if parsing fails."""
-    mock_ollama.return_value = "this is not valid json"
-    papers = make_papers(52)
-    with pytest.raises(json.JSONDecodeError):
-        # The fallback only triggers within select_top_papers
-        # _stage1_shortlist itself raises on JSON error
-        _stage1_shortlist(papers)
+    assert selections[0].title != ""
+    assert selections[0].abstract != ""
+    assert selections[0].journal != ""
+    assert selections[0].reason != ""
 
 
 # ---------------------------------------------------------------------------
@@ -183,8 +120,7 @@ def test_stage2_papers_have_reason(mock_ollama):
     candidates = make_papers(15)
     selected = _stage2_select(candidates)
     for paper in selected:
-        assert "reason" in paper
-        assert len(paper["reason"]) > 0
+        assert paper.reason != ""
 
 
 # ---------------------------------------------------------------------------
@@ -197,37 +133,41 @@ def test_select_top_papers_empty_input():
     assert result == []
 
 
+@patch("paperpulse.scoring.embeddings.shortlist_by_embedding")
 @patch("paperpulse.scoring.llm._call_ollama")
-def test_select_top_papers_full_pipeline(mock_ollama):
+def test_select_top_papers_full_pipeline(mock_ollama, mock_embed):
     """Full pipeline should return 3 papers with reasons."""
-    # Stage 1 returns indices, stage 2 returns selections
-    mock_ollama.side_effect = [
-        VALID_INDICES_RESPONSE,
-        VALID_SELECTIONS_RESPONSE,
-    ]
+    mock_embed.return_value = make_papers(STAGE1_CANDIDATES)
+    mock_ollama.return_value = VALID_SELECTIONS_RESPONSE
+
     papers = make_papers(52)
     result = select_top_papers(papers)
+
     assert len(result) == 3
-    assert mock_ollama.call_count == 2
+    mock_embed.assert_called_once()
+    mock_ollama.assert_called_once()
 
 
+@patch("paperpulse.scoring.embeddings.shortlist_by_embedding")
 @patch("paperpulse.scoring.llm._call_ollama")
-def test_select_top_papers_returns_empty_on_connection_error(mock_ollama):
+def test_select_top_papers_returns_empty_on_connection_error(mock_ollama, mock_embed):
     """Should return empty list if Ollama is unreachable."""
     import requests
+    mock_embed.return_value = make_papers(STAGE1_CANDIDATES)
     mock_ollama.side_effect = requests.exceptions.ConnectionError("refused")
+
     papers = make_papers(10)
     result = select_top_papers(papers)
     assert result == []
 
 
+@patch("paperpulse.scoring.embeddings.shortlist_by_embedding")
 @patch("paperpulse.scoring.llm._call_ollama")
-def test_select_top_papers_calls_ollama_twice(mock_ollama):
-    """Pipeline should make exactly 2 calls to Ollama."""
-    mock_ollama.side_effect = [
-        VALID_INDICES_RESPONSE,
-        VALID_SELECTIONS_RESPONSE,
-    ]
+def test_select_top_papers_calls_ollama_once(mock_ollama, mock_embed):
+    """Pipeline should make exactly 1 call to Ollama (stage 2 only)."""
+    mock_embed.return_value = make_papers(STAGE1_CANDIDATES)
+    mock_ollama.return_value = VALID_SELECTIONS_RESPONSE
+
     papers = make_papers(52)
     select_top_papers(papers)
-    assert mock_ollama.call_count == 2
+    assert mock_ollama.call_count == 1
