@@ -94,16 +94,19 @@ def shortlist_by_embedding(papers: list[Paper], n: int = 15) -> list[Paper]:
 
     print(f"Computing embeddings for {len(papers)} papers...")
 
-    # Embed the interest profile
-    profile_vec = model.encode(INTEREST_PROFILE, show_progress_bar=False, convert_to_numpy=True)
+    # Embed each interest topic separately so no single centroid dilutes niche topics
+    profile_topics = [s.strip() for s in INTEREST_PROFILE.strip().splitlines() if s.strip()]
+    profile_vecs = model.encode(profile_topics, show_progress_bar=False, convert_to_numpy=True)
 
     # Embed all papers (batched for efficiency)
     paper_texts = [_paper_text(p) for p in papers]
     paper_vecs = model.encode(paper_texts, show_progress_bar=False, batch_size=32, convert_to_numpy=True)
 
-    # Compute cosine similarity and set score on each paper
+    # Score each paper by its best-matching topic (max over all topic vectors)
     for i, paper in enumerate(papers):
-        paper.embedding_score = round(_cosine_similarity(paper_vecs[i], profile_vec), 4)
+        paper.embedding_score = round(max(
+            _cosine_similarity(paper_vecs[i], pv) for pv in profile_vecs
+        ), 4)
 
     # Sort by score descending and return top N
     sorted_papers = sorted(papers, key=lambda p: p.embedding_score, reverse=True)

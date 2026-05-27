@@ -7,7 +7,7 @@ Designed for clinicians and researchers who want to stay current without drownin
 ## How it works
 
 1. **Fetch** — queries PubMed daily for papers from a curated journal whitelist (focused journals fetched in full, broad journals filtered by topic keywords)
-2. **Embed** — ranks all papers by semantic similarity to your interest profile using a biomedical embedding model (`pritamdeka/S-PubMedBert-MS-MARCO`)
+2. **Embed** — ranks all papers by semantic similarity to your interest profile; each topic line is embedded separately and papers are scored by their best-matching topic, using a biomedical embedding model (`pritamdeka/S-PubMedBert-MS-MARCO`)
 3. **Score** — passes the top 15 candidates to a local LLM (Ollama) which selects the final 3 with a one-sentence relevance explanation
 4. **Serve** — results are stored in PostgreSQL and served as an HTMX widget, refreshing every 6 hours
 
@@ -84,7 +84,7 @@ The widget is available at `http://localhost:5001`. Past digests can be viewed a
 
 ## Configuration
 
-Edit `paperpulse/config.py` to customize your interest profile. This text is used by both the embedding pre-filter and the LLM scoring step to determine paper relevance.
+Edit `paperpulse/config.py` to customize your interest profile. Each line is treated as a separate topic — the embedding step scores papers against each topic individually and picks the best match, so writing one topic per line gives better results than a single dense paragraph. This profile is also passed to the LLM scoring step.
 
 Edit the journal lists in `paperpulse/fetchers/pubmed.py` to adjust which journals are included.
 
