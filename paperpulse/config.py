@@ -13,11 +13,17 @@ Edit INTEREST_PROFILE to tune which papers get selected for you.
 # Edit this to adjust which papers get selected for you.
 
 INTEREST_PROFILE = """
-AI-powered clinical decision support across all medical specialties,
-including tumor board decisions, diagnosis assistance, and outcome prediction.
-NLP applied to clinical notes and medical documentation.
-Health data infrastructure including EHRs, interoperability, and FHIR.
-Digital therapeutics.
-Real-world clinical applications and results.
-Novel technical approaches enabling clinical AI.
+AI clinical decision support
+Tumor board decision support AI
+AI-assisted diagnosis
+Clinical outcome prediction
+NLP applied to clinical notes
+NLP for medical documentation and discharge summaries
+Information extraction from clinical text
+Electronic health record systems and EHR integration
+Health data interoperability standards
+FHIR implementation and clinical data exchange
+Digital therapeutics
+Real-world clinical AI applications
+Novel technical approaches enabling clinical AI
 """
