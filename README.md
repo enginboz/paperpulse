@@ -88,6 +88,17 @@ Edit `paperpulse/config.py` to customize your interest profile. Each line is tre
 
 Edit the journal lists in `paperpulse/fetchers/pubmed.py` to adjust which journals are included.
 
+### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `PUBMED_EMAIL` | — | Email sent with PubMed API requests (polite usage) |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
+| `OLLAMA_MODEL` | `llama3.2` | Model name to use for LLM scoring |
+| `DATABASE_URL` | — | PostgreSQL connection string |
+| `LOG_LEVEL` | `INFO` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `HF_HUB_OFFLINE` | — | Set to `1` after the embedding model is downloaded to skip HuggingFace network checks on every run. Remove temporarily to pull a fresh model version. |
+
 ## Scheduling
 
 Add to crontab to run daily at 6am:

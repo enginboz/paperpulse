@@ -15,6 +15,7 @@ Ollama API docs: https://github.com/ollama/ollama/blob/main/docs/api.md
 """
 
 import json
+import logging
 import os
 
 import requests
@@ -24,6 +25,8 @@ from paperpulse.config import INTEREST_PROFILE
 from paperpulse.models import Paper
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -82,7 +85,7 @@ def _parse_selections(response_text: str, papers: list[Paper]) -> list[Paper]:
         reason = selection.get("reason", "")
 
         if not index or index < 1 or index > len(papers):
-            print(f"Warning: LLM returned invalid index {index} — skipping.")
+            logger.warning("LLM returned invalid index %s — skipping.", index)
             continue
 
         paper = papers[index - 1]
@@ -137,10 +140,10 @@ Respond ONLY with a valid JSON array. No preamble, no explanation, no markdown. 
   }}
 ]"""
 
-    print(f"Stage 2: selecting top 3 from {len(candidates)} candidates (full abstracts)...")
+    logger.info("Stage 2: selecting top 3 from %d candidates (full abstracts)...", len(candidates))
     response_text = _call_ollama(prompt)
     selected = _parse_selections(response_text, candidates)
-    print(f"Stage 2 complete — {len(selected)} papers selected.")
+    logger.info("Stage 2 complete — %d papers selected.", len(selected))
     return selected
 
 
@@ -165,7 +168,7 @@ def select_top_papers(papers: list[Paper]) -> list[Paper]:
     if not papers:
         return []
 
-    print(f"\nStarting paper selection...")
+    logger.info("Starting paper selection...")
 
     try:
         from paperpulse.scoring.embeddings import shortlist_by_embedding
@@ -174,17 +177,17 @@ def select_top_papers(papers: list[Paper]) -> list[Paper]:
         if not candidates:
             return []
 
-        print(f"\nRunning LLM stage 2 with {OLLAMA_MODEL}...")
+        logger.info("Running LLM stage 2 with %s...", OLLAMA_MODEL)
         selected = _stage2_select(candidates)
 
-        print(f"\nSelection complete — {len(selected)} papers selected.")
+        logger.info("Selection complete — %d papers selected.", len(selected))
         return selected
 
     except json.JSONDecodeError as e:
-        print(f"Error: LLM response was not valid JSON — {e}")
+        logger.error("LLM response was not valid JSON — %s", e)
         return []
 
     except requests.exceptions.RequestException as e:
-        print(f"Error: Could not reach Ollama at {OLLAMA_BASE_URL} — {e}")
-        print("Make sure Ollama is running: ollama serve")
+        logger.error("Could not reach Ollama at %s — %s", OLLAMA_BASE_URL, e)
+        logger.error("Make sure Ollama is running: ollama serve")
         return []

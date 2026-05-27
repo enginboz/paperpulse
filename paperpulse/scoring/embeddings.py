@@ -16,11 +16,15 @@ Alternative for faster/lighter usage:
   - all-MiniLM-L6-v2 (80MB, good general-purpose semantic similarity)
 """
 
+import logging
+
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
 from paperpulse.config import INTEREST_PROFILE
 from paperpulse.models import Paper
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -45,9 +49,9 @@ def _get_model() -> SentenceTransformer:
     """
     global _model
     if _model is None:
-        print(f"Loading embedding model '{EMBEDDING_MODEL}'...")
+        logger.info("Loading embedding model '%s'...", EMBEDDING_MODEL)
         _model = SentenceTransformer(EMBEDDING_MODEL)
-        print("Model loaded.")
+        logger.info("Embedding model loaded.")
     return _model
 
 
@@ -92,7 +96,7 @@ def shortlist_by_embedding(papers: list[Paper], n: int = 15) -> list[Paper]:
 
     model = _get_model()
 
-    print(f"Computing embeddings for {len(papers)} papers...")
+    logger.info("Computing embeddings for %d papers...", len(papers))
 
     # Embed each interest topic separately so no single centroid dilutes niche topics
     profile_topics = [s.strip() for s in INTEREST_PROFILE.strip().splitlines() if s.strip()]
@@ -103,17 +107,22 @@ def shortlist_by_embedding(papers: list[Paper], n: int = 15) -> list[Paper]:
     paper_vecs = model.encode(paper_texts, show_progress_bar=False, batch_size=32, convert_to_numpy=True)
 
     # Score each paper by its best-matching topic (max over all topic vectors)
+    topic_scores = [
+        [_cosine_similarity(paper_vecs[i], pv) for pv in profile_vecs]
+        for i in range(len(papers))
+    ]
+    best_topics = []
     for i, paper in enumerate(papers):
-        paper.embedding_score = round(max(
-            _cosine_similarity(paper_vecs[i], pv) for pv in profile_vecs
-        ), 4)
+        best_idx = max(range(len(profile_topics)), key=lambda j: topic_scores[i][j])
+        paper.embedding_score = round(topic_scores[i][best_idx], 4)
+        best_topics.append(profile_topics[best_idx])
 
     # Sort by score descending and return top N
-    sorted_papers = sorted(papers, key=lambda p: p.embedding_score, reverse=True)
-    top_n = sorted_papers[:n]
+    ranked = sorted(zip(papers, best_topics), key=lambda x: x[0].embedding_score, reverse=True)
+    top_n = [p for p, _ in ranked[:n]]
 
-    print(f"Top {len(top_n)} papers by embedding similarity:")
-    for p in top_n:
-        print(f"  {p.embedding_score:.3f} — {p.title[:70]}")
+    logger.info("Top %d papers by embedding similarity:", len(top_n))
+    for p, topic in ranked[:n]:
+        logger.debug("  %.3f [%s] — %s", p.embedding_score, topic, p.title[:60])
 
     return top_n

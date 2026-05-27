@@ -8,6 +8,7 @@ API docs: https://www.ncbi.nlm.nih.gov/books/NBK25501/
 No API key required for low-volume usage (<3 requests/second).
 """
 
+import logging
 import os
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
@@ -19,6 +20,8 @@ from dotenv import load_dotenv
 from paperpulse.models import Paper
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -211,8 +214,7 @@ def _parse_xml(xml_text: str) -> list[Paper]:
             ))
 
         except Exception as e:
-            # Skip malformed entries without crashing the whole fetch
-            print(f"Warning: could not parse article — {e}")
+            logger.warning("Could not parse article — %s", e)
             continue
 
     return papers
@@ -238,25 +240,25 @@ def fetch_recent_papers(days: int = 7, max_results: int = 100) -> list[Paper]:
         List of Paper objects.
     """
     if not PUBMED_EMAIL:
-        print("Warning: PUBMED_EMAIL not set in .env — PubMed requests an email for polite usage.")
+        logger.warning("PUBMED_EMAIL not set in .env — PubMed requests an email for polite usage.")
 
     # Query 1 — focused journals, no topic filter
     focused_query = _build_focused_query(days)
-    print(f"Querying focused journals...")
+    logger.info("Querying focused journals...")
     focused_ids = _search(focused_query, max_results)
-    print(f"Found {len(focused_ids)} papers from focused journals.")
+    logger.info("Found %d papers from focused journals.", len(focused_ids))
 
     sleep(0.4)  # Be polite to the PubMed API
 
     # Query 2 — broad journals, topic filtered
     broad_query = _build_broad_query(days)
-    print(f"Querying broad journals with topic filter...")
+    logger.info("Querying broad journals with topic filter...")
     broad_ids = _search(broad_query, max_results)
-    print(f"Found {len(broad_ids)} papers from broad journals.")
+    logger.info("Found %d papers from broad journals.", len(broad_ids))
 
     # Merge and deduplicate by PMID
     all_ids = list(dict.fromkeys(focused_ids + broad_ids))
-    print(f"Total unique papers to fetch: {len(all_ids)}")
+    logger.info("Total unique papers to fetch: %d", len(all_ids))
 
     if not all_ids:
         return []
@@ -264,6 +266,6 @@ def fetch_recent_papers(days: int = 7, max_results: int = 100) -> list[Paper]:
     sleep(0.4)
 
     papers = _fetch_details(all_ids)
-    print(f"Parsed {len(papers)} papers with abstracts.")
+    logger.info("Parsed %d papers with abstracts.", len(papers))
 
     return papers
