@@ -74,7 +74,7 @@ def test_runs_and_selection_history(store):
             RankedPaper(
                 rank=1,
                 **make_paper(1).model_dump(include=RANKED_FIELDS),
-                score=Score(total=0.5, dense=0.5, matched_topic="t"),
+                score=Score(total=0.5, fusion=0.5, dense=0.5, dense_rank=1, matched_topic="t"),
             )
         ],
     )
@@ -83,3 +83,47 @@ def test_runs_and_selection_history(store):
     assert store.latest_run() == digest
     assert store.selected_since(datetime(2026, 9, 27, tzinfo=UTC)) == {"pmid:1"}
     assert store.selected_since(datetime(2026, 9, 29, tzinfo=UTC)) == set()
+
+
+def test_keyword_search_ranks_and_restricts_to_given_ids(store):
+    store.upsert_papers(
+        [
+            make_paper(1, title="FHIR servers", abstract="FHIR FHIR interoperability"),
+            make_paper(2, title="Other", abstract="mentions fhir once among many other words"),
+            make_paper(3, title="FHIR", abstract="fhir"),
+        ]
+    )
+    hits = store.keyword_search('"fhir"', ["pmid:1", "pmid:2"])
+    assert [pid for pid, _ in hits] == ["pmid:1", "pmid:2"]
+    assert hits[0][1] > hits[1][1] > 0
+    assert store.keyword_search('"fhir"', []) == []
+
+
+def test_keyword_index_stems_words(store):
+    store.upsert_papers([make_paper(1, abstract="we implemented predictive models")])
+    assert store.keyword_search('"implementation" OR "prediction"', ["pmid:1"])
+
+
+def test_keyword_index_follows_text_changes_and_rekeying(store):
+    store.upsert_papers([make_paper(1, abstract="about fhir")])
+    store.upsert_papers([make_paper(1, abstract="about omop")])
+    assert store.keyword_search('"fhir"', ["pmid:1"]) == []
+    assert store.keyword_search('"omop"', ["pmid:1"])
+
+    store.upsert_papers([make_paper(1, id="10.1/x", doi="10.1/x", abstract="about omop")])
+    assert [pid for pid, _ in store.keyword_search('"omop"', ["10.1/x"])] == ["10.1/x"]
+
+
+def test_keyword_index_is_backfilled_for_older_databases(tmp_path):
+    from paperpulse.store import Store
+
+    path = tmp_path / "old.db"
+    s = Store(path)
+    s.upsert_papers([make_paper(1, abstract="about fhir")])
+    s.db.execute("DELETE FROM papers_fts")
+    s.db.commit()
+    s.close()
+
+    reopened = Store(path)
+    assert reopened.keyword_search('"fhir"', ["pmid:1"])
+    reopened.close()

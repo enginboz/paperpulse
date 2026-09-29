@@ -62,6 +62,12 @@ window_days = 7      # consider papers added to PubMed in the last N days
 no_repeat_days = 7   # don't pick papers selected in the last N days
 # exclude_publication_types = [...]  # defaults to editorials, comments, errata, letters, ...
 
+[retrieval]
+# Fuse BM25 keyword ranks with embedding ranks (reciprocal rank fusion).
+# Keyword search catches exact terms like FHIR or OMOP that embeddings blur.
+hybrid = true
+rrf_k = 60
+
 [embedding]
 model = "pritamdeka/S-PubMedBert-MS-MARCO"
 

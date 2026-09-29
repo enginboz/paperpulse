@@ -71,11 +71,18 @@ class Score(BaseModel):
     """Why a paper ranked where it did."""
 
     total: float = Field(
-        description="LLM relevance (1-5) plus dense similarity as tie-breaker; "
-        "dense similarity alone when the LLM stage did not run"
+        description="What the final order is sorted by: LLM relevance (1-5) plus the fusion "
+        "score as tie-breaker, or the fusion score alone when the LLM stage did not run"
     )
+    fusion: float = Field(description="Reciprocal rank fusion of the dense and keyword ranks")
     dense: float = Field(description="Cosine similarity to the best-matching topic")
-    matched_topic: str
+    dense_rank: int
+    matched_topic: str = Field(description="Best-matching topic by embedding similarity")
+    keyword_rank: int | None = Field(
+        default=None,
+        description="Rank by best BM25 score across topics; None if no topic term occurs",
+    )
+    keyword_topic: str | None = Field(default=None, description="Topic behind keyword_rank")
     assessment: Assessment | None = None
 
 

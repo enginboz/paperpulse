@@ -10,20 +10,26 @@ It runs as a one-shot command on your laptop. There is no server to keep alive, 
 
 ```
 ingest   PubMed ──▶ normalise + deduplicate ──▶ SQLite
-select   time window ──▶ hard filters ──▶ dense retrieval ──▶ LLM assessment ──▶ top N ──▶ JSON
+select   time window ──▶ hard filters ──┬─▶ dense retrieval ──┬─▶ rank fusion ──▶ LLM assessment ──▶ top N ──▶ JSON
+                                        └─▶ BM25 keywords ───┘
 ```
 
 **Ingestion and selection are separate steps.** `ingest` is incremental: each source resumes from its last watermark, and papers are keyed by DOI, so re-running is always safe. `select` works only on the local store. You can re-rank as often as you like while tuning your profile, and every embedding is computed once and cached per model.
 
 **Hard filters run before any model.** Editorials, comments, errata, letters and papers without an abstract are removed by publication type, and papers picked in the last few days are excluded.
 
-**Each paper is scored by its best-matching topic.** Your profile is a list of focused topics. A paper's score is its highest cosine similarity to any one topic, using the biomedical embedding model [`S-PubMedBert-MS-MARCO`](https://huggingface.co/pritamdeka/S-PubMedBert-MS-MARCO). Taking the maximum instead of comparing against an averaged profile keeps niche interests from being drowned out by broad ones.
+**Retrieval is hybrid.** Your profile is a list of focused topics, and every paper is ranked two ways:
 
-**An LLM judges each shortlisted paper on its own.** The best matches by similarity are assessed one at a time against a 1–5 rubric and your free-text preferences (for example, "original research over opinion pieces"). The model returns structured output: study type, a one-sentence rationale written before the score, and the relevance score. Judging papers individually, instead of asking for "the best 3 of these 20", keeps the task small enough for a local model, removes position bias, and makes every verdict cacheable and inspectable. Papers rated below a threshold are never shown, so a quiet week yields fewer picks rather than filler.
+- *Dense:* its highest cosine similarity to any one topic, using the biomedical embedding model [`S-PubMedBert-MS-MARCO`](https://huggingface.co/pritamdeka/S-PubMedBert-MS-MARCO). Taking the maximum instead of comparing against an averaged profile keeps niche interests from being drowned out by broad ones.
+- *Keyword:* its best BM25 score across topics, via SQLite FTS5 with stemming. Embeddings blur exact terms, and acronyms such as FHIR, HL7 or OMOP mean little to them. BM25 weighs rare terms heavily, so a paper that literally names one ranks high.
+
+The two rankings are merged with [reciprocal rank fusion](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf), which uses positions only, so similarity and BM25 scores never have to be put on one scale. On one week of real data, the keyword side pulled two papers into the LLM shortlist that embeddings had ranked 20th and 22nd (LLM-based pneumonia detection in radiology reports, and fact-checked medical question answering). The LLM rated both 5/5; one 5/5 paper that embeddings alone had kept (AI triage of vessel occlusion on CT) dropped out in exchange, so the shortlist gained one top-rated paper net. One week is a small sample, which is why an evaluation set is on the roadmap.
+
+**An LLM judges each shortlisted paper on its own.** The best papers after fusion are assessed one at a time against a 1–5 rubric and your free-text preferences (for example, "original research over opinion pieces"). The model returns structured output: study type, a one-sentence rationale written before the score, and the relevance score. Judging papers individually, instead of asking for "the best 3 of these 20", keeps the task small enough for a local model, removes position bias, and makes every verdict cacheable and inspectable. Papers rated below a threshold are never shown, so a quiet week yields fewer picks rather than filler.
 
 In a comparison on real data, a 3B model (`llama3.2`) rated everything 5/5 and mislabelled opinion pieces as systematic reviews, while `mistral` (7B) separated them correctly. Hence `mistral` is the local default, with Claude as a much faster cloud option.
 
-**Every pick explains itself.** The output records the matched topic, similarity and LLM assessment for each paper, plus run metadata (time window, models, candidate counts), so any selection can be understood and reproduced. Embeddings and assessments are cached, keyed by model, prompt version and profile, so re-runs only pay for what changed.
+**Every pick explains itself.** The output records each paper's dense and keyword ranks, the topics behind them and the LLM assessment, plus run metadata (time window, models, candidate counts), so any selection can be understood and reproduced. Embeddings and assessments are cached, keyed by model, prompt version and profile, so re-runs only pay for what changed.
 
 ## Quickstart
 
@@ -60,8 +66,8 @@ Global options: `-c/--config` (default `./paperpulse.toml`), `--db` (default `$P
 {
   "schema_version": "1",
   "run": {
-    "id": "40c92c44143d4065a124ad64d7236d58",
-    "created_at": "2026-09-29T09:14:32.096950Z",
+    "id": "a6ef71d838964f67b6852d63063724e5",
+    "created_at": "2026-09-29T09:43:09.457714Z",
     "window_start": "2026-09-22",
     "window_end": "2026-09-29",
     "embedding_model": "pritamdeka/S-PubMedBert-MS-MARCO",
@@ -81,9 +87,13 @@ Global options: `-c/--config` (default `./paperpulse.toml`), `--db` (default `$P
       "pmid": "42785733",
       "url": "https://pubmed.ncbi.nlm.nih.gov/42785733/",
       "score": {
-        "total": 5.9063,
+        "total": 5.032,
+        "fusion": 0.032,
         "dense": 0.9063,
+        "dense_rank": 4,
         "matched_topic": "NLP for medical documentation and discharge summaries",
+        "keyword_rank": 1,
+        "keyword_topic": "NLP for medical documentation and discharge summaries",
         "assessment": {
           "study_type": "original_research",
           "rationale": "The paper presents a new lightweight, locally deployable framework for automating brief hospital course (BHC) summarization in cardiac surgery using a large language model (LLM)-based approach, which aligns with the reader's interest in AI-assisted diagnosis, NLP applied to clinical notes, and electronic health record systems.",
@@ -109,7 +119,6 @@ Global options: `-c/--config` (default `./paperpulse.toml`), `--db` (default `$P
 
 ## Roadmap
 
-- Hybrid retrieval: BM25 keyword search fused with dense scores, for acronyms like FHIR or OMOP
 - Cross-encoder reranking between dense retrieval and the LLM stage
 - Diversity (MMR) so the top picks don't all come from one topic
 - Europe PMC source, including preprints

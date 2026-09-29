@@ -112,7 +112,7 @@ def test_llm_relevance_overrides_dense_order(store, config, embedder):
 
     assert [p.pmid for p in digest.papers] == ["3", "2"]
     assert digest.papers[0].score.assessment.relevance == 5
-    assert digest.papers[0].score.total == round(5 + digest.papers[0].score.dense, 4)
+    assert digest.papers[0].score.total == round(5 + digest.papers[0].score.fusion, 4)
     assert digest.run.llm_model == "fake-llm"
 
 
@@ -139,3 +139,27 @@ def test_llm_unavailable_falls_back_to_dense(store, config, embedder):
     assert {p.pmid for p in digest.papers} == {"1", "2"}
     assert digest.run.llm_model is None
     assert digest.papers[0].score.assessment is None
+
+
+def test_keyword_match_lifts_a_paper_embeddings_miss(store, config, embedder):
+    # FakeEmbedder only sees letters, so to it "HL7" is just "hl"; the keyword index
+    # keeps "hl7" as a token. Paper 1 wins on embeddings, only paper 2 contains "hl7".
+    config.profile.topics = ["HL7"]
+    config.selection.top = 2
+    store.upsert_papers(
+        [
+            make_paper(1, title="HL", abstract="hl hl hl"),
+            make_paper(2, title="Interface engines", abstract="hl7 feeds in hospitals"),
+        ]
+    )
+
+    dense_only = config.model_copy(deep=True)
+    dense_only.retrieval.hybrid = False
+    baseline = select(store, dense_only, embedder, now=NOW, record=False)
+    assert [p.pmid for p in baseline.papers] == ["1", "2"]
+
+    hybrid = select(store, config, embedder, now=NOW, record=False)
+    assert [p.pmid for p in hybrid.papers] == ["2", "1"]
+    lifted = hybrid.papers[0].score
+    assert (lifted.dense_rank, lifted.keyword_rank, lifted.keyword_topic) == (2, 1, "HL7")
+    assert hybrid.papers[1].score.keyword_rank is None

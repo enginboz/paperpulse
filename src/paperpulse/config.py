@@ -69,6 +69,11 @@ class Selection(BaseModel):
     require_abstract: bool = True
 
 
+class Retrieval(BaseModel):
+    hybrid: bool = Field(default=True, description="Fuse BM25 keyword ranks with dense ranks")
+    rrf_k: int = Field(default=60, ge=1, description="Reciprocal rank fusion constant")
+
+
 class Embedding(BaseModel):
     model: str = "pritamdeka/S-PubMedBert-MS-MARCO"
 
@@ -99,6 +104,7 @@ class Config(BaseModel):
     profile: Profile
     sources: Sources = Field(default_factory=Sources)
     selection: Selection = Field(default_factory=Selection)
+    retrieval: Retrieval = Field(default_factory=Retrieval)
     embedding: Embedding = Field(default_factory=Embedding)
     llm: LLM = Field(default_factory=LLM)
 

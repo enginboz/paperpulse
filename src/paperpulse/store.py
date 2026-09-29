@@ -34,6 +34,11 @@ CREATE TABLE IF NOT EXISTS papers (
 CREATE INDEX IF NOT EXISTS papers_added ON papers(added);
 CREATE INDEX IF NOT EXISTS papers_pmid ON papers(pmid);
 
+-- Keyword index for BM25. Maintained by upsert_papers(); rebuilt on open if out of sync.
+CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts USING fts5(
+    id UNINDEXED, title, abstract, tokenize = 'porter unicode61'
+);
+
 CREATE TABLE IF NOT EXISTS embeddings (
     paper_id TEXT NOT NULL REFERENCES papers(id) ON UPDATE CASCADE ON DELETE CASCADE,
     model    TEXT NOT NULL,
@@ -79,6 +84,19 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(SCHEMA)
+        self._sync_keyword_index()
+
+    def _sync_keyword_index(self) -> None:
+        """Databases created before the keyword index existed get it backfilled once."""
+        (papers,) = self.db.execute("SELECT count(*) FROM papers").fetchone()
+        (indexed,) = self.db.execute("SELECT count(*) FROM papers_fts").fetchone()
+        if papers != indexed:
+            with self.db:
+                self.db.execute("DELETE FROM papers_fts")
+                self.db.execute(
+                    "INSERT INTO papers_fts (id, title, abstract) "
+                    "SELECT id, title, abstract FROM papers"
+                )
 
     def close(self) -> None:
         self.db.close()
@@ -94,11 +112,21 @@ class Store:
                 old = self.db.execute(
                     "SELECT title, abstract FROM papers WHERE id = ?", (p.id,)
                 ).fetchone()
+                text_changed = old is not None and (old["title"], old["abstract"]) != (
+                    p.title,
+                    p.abstract,
+                )
                 if old is None:
                     new += 1
-                elif (old["title"], old["abstract"]) != (p.title, p.abstract):
+                elif text_changed:
                     self.db.execute("DELETE FROM embeddings WHERE paper_id = ?", (p.id,))
                     self.db.execute("DELETE FROM assessments WHERE paper_id = ?", (p.id,))
+                    self.db.execute("DELETE FROM papers_fts WHERE id = ?", (p.id,))
+                if old is None or text_changed:
+                    self.db.execute(
+                        "INSERT INTO papers_fts (id, title, abstract) VALUES (?, ?, ?)",
+                        (p.id, p.title, p.abstract),
+                    )
                 self.db.execute(
                     f"INSERT INTO papers ({PAPER_COLUMNS}) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
@@ -124,11 +152,14 @@ class Store:
     def _migrate_pmid_id(self, paper: Paper) -> None:
         """A paper first stored as `pmid:<n>` can gain a DOI later; re-key it so history follows."""
         if paper.doi and paper.pmid:
-            self.db.execute(
+            old_id = f"pmid:{paper.pmid}"
+            moved = self.db.execute(
                 "UPDATE papers SET id = ? WHERE id = ? AND NOT EXISTS "
                 "(SELECT 1 FROM papers WHERE id = ?)",
-                (paper.id, f"pmid:{paper.pmid}", paper.id),
-            )
+                (paper.id, old_id, paper.id),
+            ).rowcount
+            if moved:
+                self.db.execute("UPDATE papers_fts SET id = ? WHERE id = ?", (paper.id, old_id))
 
     def papers_added_between(self, start: date, end: date) -> list[Paper]:
         rows = self.db.execute(
@@ -136,6 +167,23 @@ class Store:
             (start.isoformat(), end.isoformat()),
         )
         return [_row_to_paper(r) for r in rows]
+
+    def keyword_search(self, query: str, within: list[str]) -> list[tuple[str, float]]:
+        """
+        BM25 search over titles and abstracts of the papers in `within`, best
+        first. Title matches weigh double. Scores are sign-flipped from SQLite's
+        convention so that higher is better. IDF statistics span the whole
+        corpus, which only makes them more stable.
+        """
+        if not within:
+            return []
+        marks = ",".join("?" * len(within))
+        rows = self.db.execute(
+            "SELECT id, -bm25(papers_fts, 0.0, 2.0, 1.0) AS score FROM papers_fts "
+            f"WHERE papers_fts MATCH ? AND id IN ({marks}) ORDER BY score DESC",
+            (query, *within),
+        )
+        return [(r["id"], r["score"]) for r in rows]
 
     # -- embeddings --------------------------------------------------------
 

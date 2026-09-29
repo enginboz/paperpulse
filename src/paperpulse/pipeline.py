@@ -19,6 +19,8 @@ from paperpulse.models import Digest, Paper, RankedPaper, RunInfo, Score
 from paperpulse.ranking.assess import assess_papers
 from paperpulse.ranking.dense import best_topic_matches
 from paperpulse.ranking.filters import apply_filters
+from paperpulse.ranking.fusion import reciprocal_rank_fusion
+from paperpulse.ranking.keyword import best_keyword_matches
 from paperpulse.sources import Source
 from paperpulse.store import Store
 
@@ -65,27 +67,18 @@ def select(
     scored: list[tuple[Paper, Score]] = []
     llm_used = None
     if eligible:
-        topics = config.profile.topics
-        matches = best_topic_matches(
-            embed_papers(store, embedder, eligible), embedder.encode(topics)
-        )
-        dense = [
-            (p, Score(total=m.score, dense=m.score, matched_topic=topics[m.topic_index]))
-            for p, m in zip(eligible, matches, strict=True)
-        ]
-        dense.sort(key=lambda ps: ps[1].dense, reverse=True)
-        scored = dense
+        scored = _retrieve(store, config, embedder, eligible)
 
         if llm is not None:
-            shortlist = dense[: config.llm.candidates]
+            shortlist = scored[: config.llm.candidates]
             try:
                 assessments = assess_papers(store, llm, config.profile, [p for p, _ in shortlist])
                 llm_used = llm.name
             except LLMUnavailable as e:
-                logger.warning("%s; ranking by embedding similarity only", e)
+                logger.warning("%s; ranking by retrieval scores only", e)
             else:
                 scored = [
-                    (p, s.model_copy(update={"total": a.relevance + s.dense, "assessment": a}))
+                    (p, s.model_copy(update={"total": a.relevance + s.fusion, "assessment": a}))
                     for p, s in shortlist
                     if (a := assessments.get(p.id)) and a.relevance >= config.llm.min_relevance
                 ]
@@ -101,7 +94,9 @@ def select(
         RankedPaper(
             rank=rank,
             **p.model_dump(include=RANKED_FIELDS),
-            score=s.model_copy(update={"total": round(s.total, 4), "dense": round(s.dense, 4)}),
+            score=s.model_copy(
+                update={f: round(getattr(s, f), 4) for f in ("total", "fusion", "dense")}
+            ),
         )
         for rank, (p, s) in enumerate(scored[: sel.top], 1)
     ]
@@ -122,3 +117,40 @@ def select(
     if record and ranked:
         store.save_run(digest)
     return digest
+
+
+def _retrieve(
+    store: Store, config: Config, embedder: Embedder, papers: list[Paper]
+) -> list[tuple[Paper, Score]]:
+    """Rank papers by fusing dense and keyword ranks, best first."""
+    topics = config.profile.topics
+    dense = best_topic_matches(embed_papers(store, embedder, papers), embedder.encode(topics))
+    by_dense = sorted(range(len(papers)), key=lambda i: dense[i].score, reverse=True)
+    dense_ranks = {papers[i].id: rank for rank, i in enumerate(by_dense, 1)}
+
+    keyword = {}
+    if config.retrieval.hybrid:
+        keyword = best_keyword_matches(store, topics, [p.id for p in papers])
+    fused = reciprocal_rank_fusion(
+        [dense_ranks, {pid: m.rank for pid, m in keyword.items()}], k=config.retrieval.rrf_k
+    )
+
+    scored = []
+    for paper, d in zip(papers, dense, strict=True):
+        k = keyword.get(paper.id)
+        scored.append(
+            (
+                paper,
+                Score(
+                    total=fused[paper.id],
+                    fusion=fused[paper.id],
+                    dense=d.score,
+                    dense_rank=dense_ranks[paper.id],
+                    matched_topic=topics[d.topic_index],
+                    keyword_rank=k.rank if k else None,
+                    keyword_topic=topics[k.topic_index] if k else None,
+                ),
+            )
+        )
+    scored.sort(key=lambda ps: ps[1].fusion, reverse=True)
+    return scored
