@@ -1,10 +1,11 @@
 # PaperPulse
 
+[![CI](https://github.com/enginboz/paperpulse/actions/workflows/ci.yml/badge.svg)](https://github.com/enginboz/paperpulse/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 PaperPulse finds the few new papers worth your time. It pulls recent literature from PubMed, ranks it against a research-interest profile you define, and prints the top picks as JSON, so the result can feed a dashboard, a newsletter, a notebook or any other tool.
 
 It runs as a one-shot command on your laptop. There is no server to keep alive, and with the default local LLM no data leaves your machine apart from the PubMed queries.
-
-> **Status:** v2 is a rewrite in progress. The previous prototype is kept at tag [`v1.0`](https://github.com/enginboz/paperpulse/tree/v1.0).
 
 ## How it works
 
@@ -117,12 +118,36 @@ Global options: `-c/--config` (default `./paperpulse.toml`), `--db` (default `$P
 | `OLLAMA_BASE_URL` | Ollama server, if not `http://localhost:11434` |
 | `ANTHROPIC_API_KEY` | Required for `provider = "anthropic"` |
 
+## Project structure
+
+```
+src/paperpulse/
+├── sources/pubmed.py     # NCBI E-utilities client, incremental by Entrez date
+├── store.py              # SQLite: papers, FTS5 index, embedding/assessment caches, runs
+├── embeddings.py         # sentence-transformers wrapper with per-model cache
+├── llm.py                # Ollama and Anthropic providers behind one interface
+├── ranking/
+│   ├── filters.py        # publication type, title, abstract, recent picks
+│   ├── dense.py          # best-topic cosine similarity
+│   ├── keyword.py        # best-topic BM25
+│   ├── fusion.py         # reciprocal rank fusion
+│   └── assess.py         # per-paper LLM rubric with structured output
+├── pipeline.py           # ingest() and select()
+└── cli.py
+```
+
+## From v1 to v2
+
+The first version ([`v1.0`](https://github.com/enginboz/paperpulse/tree/v1.0)) was a working prototype: a daily cron job fetched papers into PostgreSQL, embeddings shortlisted 15 of them, a single prompt asked a local LLM to pick the best 3, and a Flask/HTMX widget displayed them. It worked, but it was hard to run anywhere else and hard to tell *why* a paper was chosen.
+
+v2 is a rewrite around three ideas: separate ingestion from selection so ranking can be re-run and tuned offline; make every stage explain itself in the output; and replace "pick 3 of 15" with per-paper judgements a small local model can make reliably. It is a one-shot CLI with SQLite, so trying it takes three commands instead of a database server and a web app.
+
 ## Roadmap
 
-- Cross-encoder reranking between dense retrieval and the LLM stage
+- **Next:** feedback (👍/👎 per paper) and an evaluation set to measure precision@k, so ranking changes are backed by numbers rather than one week of data
+- Cross-encoder reranking between retrieval and the LLM stage
 - Diversity (MMR) so the top picks don't all come from one topic
 - Europe PMC source, including preprints
-- Feedback (👍/👎) and an evaluation set to measure precision@k
 - Optional FastAPI server exposing the digest as a JSON API
 
 ## Development
