@@ -61,6 +61,43 @@ paperpulse schema                 # JSON schema of the output
 
 Global options: `-c/--config` (default `./paperpulse.toml`), `--db` (default `$PAPERPULSE_DB` or `./paperpulse.db`), `-v/--verbose`. Logs go to stderr, so stdout can be piped, e.g. `paperpulse select | jq '.papers[].title'`.
 
+## Evaluating the ranking
+
+Every ranking decision in PaperPulse (mistral over llama3.2, hybrid over dense, the thresholds) should be backed by numbers, not by one week of eyeballing. The evaluation workflow makes that measurable against your own judgements:
+
+```bash
+paperpulse feedback 1 up            # rate a digest pick (rank, DOI or pmid:<id>)
+paperpulse feedback 3 down --note "opinion piece"
+paperpulse label                    # rate a pool of papers interactively (y/n/skip/quit)
+paperpulse eval                     # compare ranking variants against your labels
+paperpulse eval --assess            # also run the LLM on unassessed shortlist papers
+paperpulse labels export labels.jsonl
+paperpulse labels import labels.jsonl   # re-fetches missing papers from PubMed
+```
+
+Rating only what a digest showed would make the current ranking look perfect by construction, because nothing it missed ever gets judged. `paperpulse label` therefore asks about a **pool**: the union of the top papers of the dense, keyword and hybrid rankings, interleaved so that quitting early still covers the head of each (the pooling method used in TREC evaluations).
+
+`paperpulse eval` re-ranks every labelled time window with each variant, using exactly the code path of `select`, and reports:
+
+| Metric | Meaning |
+|---|---|
+| `P@k` | Share of relevant papers among the ones the variant would show |
+| `R@n` | Share of all relevant papers that reach the top n, the LLM shortlist; the ceiling for the LLM stage |
+| `judged` | Share of the top k that carry a label; unlabelled papers count as not relevant, so low coverage means label more |
+
+Example of the report format (made-up numbers, not a measured result):
+
+```
+2 window(s), 9 relevant labelled papers
+
+variant         P@3   R@12  judged
+dense           33%    67%     100%
+hybrid          50%    89%     100%
+hybrid+llm      83%    89%     100%
+```
+
+The LLM variant uses cached assessments by default, so evaluation is instant; `--assess` fills gaps. Labels export to JSONL, so an evaluation set can be versioned alongside the config and rebuilt on another machine.
+
 ## Output
 
 ```json
@@ -132,7 +169,9 @@ src/paperpulse/
 │   ├── keyword.py        # best-topic BM25
 │   ├── fusion.py         # reciprocal rank fusion
 │   └── assess.py         # per-paper LLM rubric with structured output
-├── pipeline.py           # ingest() and select()
+├── pipeline.py           # ingest(), select() and the shared rank_papers()
+├── labelling.py          # feedback, interactive pool labelling, JSONL export/import
+├── evaluation.py         # pooling and P@k / R@n per ranking variant
 └── cli.py
 ```
 
@@ -144,7 +183,7 @@ v2 is a rewrite around three ideas: separate ingestion from selection so ranking
 
 ## Roadmap
 
-- **Next:** feedback (👍/👎 per paper) and an evaluation set to measure precision@k, so ranking changes are backed by numbers rather than one week of data
+- **Next:** learn from feedback, e.g. use papers rated 👍 as extra positive examples in the profile, validated with `paperpulse eval`
 - Cross-encoder reranking between retrieval and the LLM stage
 - Diversity (MMR) so the top picks don't all come from one topic
 - Europe PMC source, including preprints

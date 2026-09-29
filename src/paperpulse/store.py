@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from paperpulse.models import Assessment, Digest, Paper
+from paperpulse.models import Assessment, Digest, Label, Paper
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS papers (
@@ -51,6 +51,14 @@ CREATE TABLE IF NOT EXISTS assessments (
     key        TEXT NOT NULL,
     assessment TEXT NOT NULL,
     PRIMARY KEY (paper_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS labels (
+    paper_id    TEXT PRIMARY KEY REFERENCES papers(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    relevant    INTEGER NOT NULL,
+    source      TEXT NOT NULL,
+    note        TEXT,
+    labelled_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS ingest_state (
@@ -231,6 +239,46 @@ class Store:
                 (paper_id, key, assessment.model_dump_json()),
             )
 
+    # -- labels --------------------------------------------------------------
+
+    def get_paper(self, paper_id: str) -> Paper | None:
+        row = self.db.execute(
+            f"SELECT {PAPER_COLUMNS} FROM papers WHERE id = ?", (paper_id,)
+        ).fetchone()
+        return _row_to_paper(row) if row else None
+
+    def set_label(self, label: Label) -> None:
+        """Later judgements replace earlier ones for the same paper."""
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO labels (paper_id, relevant, source, note, labelled_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    label.paper_id,
+                    int(label.relevant),
+                    label.source,
+                    label.note,
+                    label.labelled_at.isoformat(),
+                ),
+            )
+
+    def get_labels(self) -> dict[str, Label]:
+        rows = self.db.execute("SELECT * FROM labels ORDER BY labelled_at")
+        return {r["paper_id"]: Label.model_validate(dict(r)) for r in rows}
+
+    def labelled_papers(self) -> list[tuple[Label, Paper]]:
+        rows = self.db.execute(
+            f"SELECT l.*, {', '.join(f'p.{c}' for c in PAPER_COLUMNS.split(', '))} "
+            "FROM labels l JOIN papers p ON p.id = l.paper_id ORDER BY p.added, p.id"
+        )
+        return [
+            (
+                Label.model_validate(dict(r)),
+                _row_to_paper({c: r[c] for c in PAPER_COLUMNS.split(", ")}),
+            )
+            for r in rows
+        ]
+
     # -- ingestion watermark -----------------------------------------------
 
     def last_ingested(self, source: str) -> date | None:
@@ -272,7 +320,7 @@ class Store:
         return Digest.model_validate_json(row["digest"]) if row else None
 
 
-def _row_to_paper(row: sqlite3.Row) -> Paper:
+def _row_to_paper(row: sqlite3.Row | dict) -> Paper:
     data = dict(row)
     data["authors"] = json.loads(data["authors"])
     data["publication_types"] = json.loads(data["publication_types"])

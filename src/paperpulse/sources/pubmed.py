@@ -57,6 +57,13 @@ class PubMedSource:
         for i in range(0, len(pmids), FETCH_BATCH):
             yield from parse_pubmed_xml(self._efetch(pmids[i : i + FETCH_BATCH]))
 
+    def fetch_pmids(self, pmids: list[str]) -> list[Paper]:
+        """Fetch specific records, e.g. to rebuild papers behind an imported label set."""
+        papers = []
+        for i in range(0, len(pmids), FETCH_BATCH):
+            papers.extend(parse_pubmed_xml(self._efetch(pmids[i : i + FETCH_BATCH])))
+        return papers
+
     def build_queries(self, start: date, end: date) -> list[str]:
         window = f'("{start:%Y/%m/%d}"[EDAT] : "{end:%Y/%m/%d}"[EDAT])'
         queries = []

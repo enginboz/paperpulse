@@ -1,0 +1,123 @@
+import json
+from datetime import UTC, date, datetime
+
+from paperpulse import cli
+from paperpulse.labelling import (
+    export_labels,
+    import_labels,
+    label_interactively,
+    record_feedback,
+    resolve_paper,
+)
+from paperpulse.models import Label
+from paperpulse.pipeline import select
+from paperpulse.store import Store
+from tests.conftest import FakeEmbedder, make_paper
+
+NOW = datetime(2026, 9, 29, 6, tzinfo=UTC)
+
+
+def _label(pid: str, relevant: bool, source="pool") -> Label:
+    return Label(paper_id=pid, relevant=relevant, source=source, labelled_at=NOW)
+
+
+def test_later_labels_replace_earlier_ones(store):
+    store.upsert_papers([make_paper(1)])
+    store.set_label(_label("pmid:1", True))
+    store.set_label(_label("pmid:1", False, source="feedback"))
+    labels = store.get_labels()
+    assert (labels["pmid:1"].relevant, labels["pmid:1"].source) == (False, "feedback")
+
+
+def test_labels_follow_a_paper_that_gains_a_doi(store):
+    store.upsert_papers([make_paper(1)])
+    store.set_label(_label("pmid:1", True))
+    store.upsert_papers([make_paper(1, id="10.1/x", doi="10.1/x")])
+    assert list(store.get_labels()) == ["10.1/x"]
+
+
+def test_resolve_paper_by_digest_rank_doi_or_pmid(store, config, embedder):
+    store.upsert_papers(
+        [
+            make_paper(1, abstract="fhir interoperability"),
+            make_paper(2, id="10.1/abc", doi="10.1/ABC", abstract="clinical notes nlp"),
+        ]
+    )
+    digest = select(store, config, embedder, now=NOW)
+
+    assert resolve_paper(store, "1").id == digest.papers[0].id
+    assert resolve_paper(store, "10.1/ABC").id == "10.1/abc"
+    assert resolve_paper(store, "pmid:1").id == "pmid:1"
+    assert resolve_paper(store, "9") is None
+    assert resolve_paper(store, "10.9/missing") is None
+
+
+def test_feedback_is_stored_as_a_label(store):
+    store.upsert_papers([make_paper(1)])
+    record_feedback(store, make_paper(1), relevant=True, note="great method", now=NOW)
+    assert store.get_labels()["pmid:1"] == Label(
+        paper_id="pmid:1", relevant=True, source="feedback", note="great method", labelled_at=NOW
+    )
+
+
+def test_interactive_labelling_handles_skip_invalid_and_quit(store):
+    papers = [make_paper(n) for n in (1, 2, 3, 4)]
+    store.upsert_papers(papers)
+    answers = iter(["y", "maybe", "n", "s", "q"])
+    shown = []
+
+    written = label_interactively(store, papers, ask=lambda _: next(answers), show=shown.append)
+
+    assert written == 2
+    assert {pid: lab.relevant for pid, lab in store.get_labels().items()} == {
+        "pmid:1": True,
+        "pmid:2": False,
+    }
+    assert "Please answer y, n, s or q." in shown
+    assert "[1/4]" in shown[0] and "Paper 1" in shown[0]
+
+
+def test_export_import_round_trip_fetches_missing_papers(store, tmp_path):
+    store.upsert_papers([make_paper(1), make_paper(2)])
+    store.set_label(_label("pmid:1", True))
+    store.set_label(_label("pmid:2", False))
+    lines = list(export_labels(store))
+    assert json.loads(lines[0])["relevant"] is True
+
+    fresh = Store(tmp_path / "fresh.db")
+    fresh.upsert_papers([make_paper(1)])
+    requested = []
+
+    def fetch(pmids):
+        requested.extend(pmids)
+        return [make_paper(int(p)) for p in pmids]
+
+    assert import_labels(fresh, lines, fetch_by_pmid=fetch) == (2, 0)
+    assert requested == ["2"]
+    assert {lab.source for lab in fresh.get_labels().values()} == {"import"}
+    fresh.close()
+
+
+def test_import_skips_papers_it_cannot_find(store):
+    line = json.dumps({"id": "10.1/gone", "pmid": None, "relevant": True})
+    assert import_labels(store, [line]) == (0, 1)
+
+
+def test_cli_feedback_and_export(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(cli, "SentenceTransformerEmbedder", lambda _: FakeEmbedder())
+    config = tmp_path / "paperpulse.toml"
+    config.write_text('[profile]\ntopics = ["fhir"]\n[llm]\nenabled = false\n')
+    db = tmp_path / "pp.db"
+    s = Store(db)
+    s.upsert_papers([make_paper(1, abstract="fhir", added=date.today())])
+    s.close()
+    base = ["-c", str(config), "--db", str(db)]
+
+    assert cli.main([*base, "select"]) == 0
+    assert cli.main([*base, "feedback", "1", "up", "--note", "useful"]) == 0
+    assert "👍 Paper 1" in capsys.readouterr().out
+    assert cli.main([*base, "feedback", "7", "down"]) == 1
+
+    assert cli.main([*base, "labels", "export"]) == 0
+    exported = json.loads(capsys.readouterr().out)
+    assert (exported["id"], exported["relevant"], exported["note"]) == ("pmid:1", True, "useful")

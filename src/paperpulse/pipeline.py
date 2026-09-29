@@ -10,6 +10,7 @@ select()  ranks stored papers against the profile and returns a Digest. It
 
 import logging
 import uuid
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
 from paperpulse.config import Config
@@ -31,6 +32,11 @@ logger = logging.getLogger(__name__)
 INGEST_OVERLAP = timedelta(days=1)
 
 RANKED_FIELDS = {"id", "title", "journal", "published", "authors", "doi", "pmid", "url"}
+
+
+def window_start(end: date, days: int) -> date:
+    """First day of a `days`-long window ending on `end`, both inclusive."""
+    return end - timedelta(days=days - 1)
 
 
 def ingest(store: Store, sources: list[Source], default_days: int, today: date) -> int:
@@ -57,38 +63,15 @@ def select(
     now = now or datetime.now(UTC)
     sel = config.selection
     window_end = now.date()
-    window_start = window_end - timedelta(days=sel.window_days)
+    start = window_start(window_end, sel.window_days)
 
-    candidates = store.papers_added_between(window_start, window_end)
+    candidates = store.papers_added_between(start, window_end)
     recent = store.selected_since(now - timedelta(days=sel.no_repeat_days))
     eligible = apply_filters(candidates, sel, exclude_ids=recent)
     logger.info("%d candidates, %d after filters", len(candidates), len(eligible))
 
-    scored: list[tuple[Paper, Score]] = []
-    llm_used = None
-    if eligible:
-        scored = _retrieve(store, config, embedder, eligible)
-
-        if llm is not None:
-            shortlist = scored[: config.llm.candidates]
-            try:
-                assessments = assess_papers(store, llm, config.profile, [p for p, _ in shortlist])
-                llm_used = llm.name
-            except LLMUnavailable as e:
-                logger.warning("%s; ranking by retrieval scores only", e)
-            else:
-                scored = [
-                    (p, s.model_copy(update={"total": a.relevance + s.fusion, "assessment": a}))
-                    for p, s in shortlist
-                    if (a := assessments.get(p.id)) and a.relevance >= config.llm.min_relevance
-                ]
-                logger.info(
-                    "%d of %d shortlisted papers rated relevance >= %d",
-                    len(scored),
-                    len(shortlist),
-                    config.llm.min_relevance,
-                )
-                scored.sort(key=lambda ps: ps[1].total, reverse=True)
+    ranking = rank_papers(store, config, embedder, eligible, llm=llm)
+    scored, llm_used = ranking.papers, ranking.llm_model
 
     ranked = [
         RankedPaper(
@@ -105,7 +88,7 @@ def select(
         run=RunInfo(
             id=uuid.uuid4().hex,
             created_at=now,
-            window_start=window_start,
+            window_start=start,
             window_end=window_end,
             embedding_model=embedder.name,
             llm_model=llm_used,
@@ -117,6 +100,61 @@ def select(
     if record and ranked:
         store.save_run(digest)
     return digest
+
+
+@dataclass
+class Ranking:
+    papers: list[tuple[Paper, Score]]
+    llm_model: str | None
+    shortlist: list[str] = field(default_factory=list)
+    """Paper ids that reached the LLM stage, in retrieval order."""
+
+
+def rank_papers(
+    store: Store,
+    config: Config,
+    embedder: Embedder,
+    papers: list[Paper],
+    llm: LLM | None = None,
+    cached_assessments_only: bool = False,
+) -> Ranking:
+    """
+    Order papers best first: hybrid retrieval, then (with an LLM) per-paper
+    assessment of the shortlist. Shared by `select` and `eval`, so evaluation
+    measures exactly what the digest would show.
+    """
+    if not papers:
+        return Ranking([], None)
+    scored = _retrieve(store, config, embedder, papers)
+    if llm is None:
+        return Ranking(scored, None)
+
+    shortlist = scored[: config.llm.candidates]
+    try:
+        assessments = assess_papers(
+            store,
+            llm,
+            config.profile,
+            [p for p, _ in shortlist],
+            cached_only=cached_assessments_only,
+        )
+    except LLMUnavailable as e:
+        logger.warning("%s; ranking by retrieval scores only", e)
+        return Ranking(scored, None)
+
+    kept = [
+        (p, s.model_copy(update={"total": a.relevance + s.fusion, "assessment": a}))
+        for p, s in shortlist
+        if (a := assessments.get(p.id)) and a.relevance >= config.llm.min_relevance
+    ]
+    logger.info(
+        "%d of %d shortlisted papers rated relevance >= %d",
+        len(kept),
+        len(shortlist),
+        config.llm.min_relevance,
+    )
+    kept.sort(key=lambda ps: ps[1].total, reverse=True)
+    return Ranking(kept, llm.name, [p.id for p, _ in shortlist])
 
 
 def _retrieve(

@@ -116,3 +116,15 @@ class Digest(BaseModel):
     schema_version: str = SCHEMA_VERSION
     run: RunInfo
     papers: list[RankedPaper]
+
+
+class Label(BaseModel):
+    """A human relevance judgement of one paper against the reader's interests."""
+
+    paper_id: str
+    relevant: bool
+    source: Literal["feedback", "pool", "import"] = Field(
+        description="feedback: rated from a digest; pool: rated via `paperpulse label`"
+    )
+    note: str | None = None
+    labelled_at: datetime

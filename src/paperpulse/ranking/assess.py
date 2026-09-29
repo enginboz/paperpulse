@@ -72,16 +72,17 @@ def build_user_prompt(paper: Paper) -> str:
 
 
 def assess_papers(
-    store: Store, llm: LLM, profile: Profile, papers: list[Paper]
+    store: Store, llm: LLM, profile: Profile, papers: list[Paper], cached_only: bool = False
 ) -> dict[str, Assessment]:
     """
     Assess papers, reusing cached verdicts. Papers whose response stays invalid
-    after one retry are left out. Raises LLMUnavailable if the server is down.
+    after one retry are left out, as are uncached papers when `cached_only`.
+    Raises LLMUnavailable if the server is down.
     """
     key = cache_key(llm, profile)
     results = store.get_assessments([p.id for p in papers], key)
     missing = [p for p in papers if p.id not in results]
-    if not missing:
+    if not missing or cached_only:
         return results
 
     logger.info("Assessing %d papers with %s (%d cached)", len(missing), llm.name, len(results))
