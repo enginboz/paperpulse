@@ -33,6 +33,16 @@ DEFAULT_EXCLUDED_TYPES = [
 ]
 
 
+DEFAULT_EXCLUDED_TITLE_PREFIXES = [
+    "Correction:",
+    "Corrigendum",
+    "Erratum",
+    "Retraction:",
+    "Retracted:",
+    "Expression of Concern",
+]
+
+
 class Profile(BaseModel):
     topics: list[str] = Field(min_length=1)
     preferences: str = Field(
@@ -65,6 +75,9 @@ class Selection(BaseModel):
     no_repeat_days: int = 7
     exclude_publication_types: list[str] = Field(
         default_factory=lambda: list(DEFAULT_EXCLUDED_TYPES)
+    )
+    exclude_title_prefixes: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_EXCLUDED_TITLE_PREFIXES)
     )
     require_abstract: bool = True
 

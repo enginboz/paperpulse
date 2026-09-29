@@ -16,7 +16,7 @@ select   time window ──▶ hard filters ──┬─▶ dense retrieval ─�
 
 **Ingestion and selection are separate steps.** `ingest` is incremental: each source resumes from its last watermark, and papers are keyed by DOI, so re-running is always safe. `select` works only on the local store. You can re-rank as often as you like while tuning your profile, and every embedding is computed once and cached per model.
 
-**Hard filters run before any model.** Editorials, comments, errata, letters and papers without an abstract are removed by publication type, and papers picked in the last few days are excluded.
+**Hard filters run before any model.** Editorials, comments, errata and letters are removed by publication type, correction notices by title (journals often file them as ordinary articles), papers without an abstract are dropped, and papers picked in the last few days are excluded.
 
 **Retrieval is hybrid.** Your profile is a list of focused topics, and every paper is ranked two ways:
 

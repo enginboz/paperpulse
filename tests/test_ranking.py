@@ -69,3 +69,12 @@ def test_rrf_rewards_agreement_and_tolerates_missing_items():
     assert fused["a"] == 1 / 61 + 1 / 62
     assert fused["b"] == 1 / 62
     assert sorted(fused, key=fused.get, reverse=True) == ["a", "c", "b"]
+
+
+def test_filters_drop_correction_notices_filed_as_articles():
+    papers = [
+        make_paper(1, title="Correction: Lessons learned", publication_types=["Journal Article"]),
+        make_paper(2, title="Erratum to: FHIR study"),
+        make_paper(3, title="Corrections in EHR data are common"),
+    ]
+    assert [p.pmid for p in apply_filters(papers, Selection(), set())] == ["3"]
