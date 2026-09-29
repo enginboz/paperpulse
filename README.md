@@ -1,109 +1,113 @@
 # PaperPulse
 
-PaperPulse is a daily medical literature digest tool. It automatically fetches recent papers from leading digital medicine journals and uses a two-stage AI pipeline to surface the 3 most relevant papers of the day based on a configurable interest profile.
+PaperPulse finds the few new papers worth your time. It pulls recent literature from PubMed, ranks it against a research-interest profile you define, and prints the top picks as JSON, so the result can feed a dashboard, a newsletter, a notebook or any other tool.
 
-Designed for clinicians and researchers who want to stay current without drowning in journal alerts.
+It runs locally as a one-shot command. There is no server to keep alive and no data leaves your machine apart from the PubMed queries.
+
+> **Status:** v2 is a rewrite in progress. The previous prototype is kept at tag [`v1.0`](https://github.com/enginboz/paperpulse/tree/v1.0).
 
 ## How it works
 
-1. **Fetch** — queries PubMed daily for papers from a curated journal whitelist (focused journals fetched in full, broad journals filtered by topic keywords)
-2. **Embed** — ranks all papers by semantic similarity to your interest profile; each topic line is embedded separately and papers are scored by their best-matching topic, using a biomedical embedding model (`pritamdeka/S-PubMedBert-MS-MARCO`)
-3. **Score** — passes the top 15 candidates to a local LLM (Ollama) which selects the final 3 with a one-sentence relevance explanation
-4. **Serve** — results are stored in PostgreSQL and served as an HTMX widget, refreshing every 6 hours
-
-Papers shown in the last 7 days are automatically excluded to ensure fresh selections daily.
-
-## Stack
-
-- **Python** — pipeline, fetching, scoring, and scheduling
-- **PostgreSQL** — stores fetched papers and daily digests
-- **Flask + HTMX** — lightweight web server and dashboard widget
-- **sentence-transformers** — biomedical embedding model for semantic pre-filtering
-- **Ollama** — local LLM for final paper selection (provider-configurable)
-
-## Project Structure
-
 ```
-paperpulse/
-├── paperpulse/
-│   ├── fetchers/
-│   │   └── pubmed.py        # PubMed E-utilities API client
-│   ├── scoring/
-│   │   ├── embeddings.py    # Biomedical embedding pre-filter
-│   │   └── llm.py           # LLM-based final selection (Ollama)
-│   ├── models.py            # Paper and Digest dataclasses
-│   ├── config.py            # Interest profile configuration
-│   ├── db.py                # Database ORM models and queries
-│   └── app.py               # Flask app and HTMX endpoints
-├── tests/
-├── .env.example
-├── pyproject.toml
-├── poetry.lock
-└── run.py                   # Daily pipeline entry point
+ingest   PubMed ──▶ normalise + deduplicate ──▶ SQLite
+select   time window ──▶ hard filters ──▶ dense retrieval ──▶ top N ──▶ JSON
 ```
 
-## Setup
+**Ingestion and selection are separate steps.** `ingest` is incremental: each source resumes from its last watermark, and papers are keyed by DOI, so re-running is always safe. `select` works only on the local store. You can re-rank as often as you like while tuning your profile, and every embedding is computed once and cached per model.
 
-### Prerequisites
+**Hard filters run before any model.** Editorials, comments, errata, letters and papers without an abstract are removed by publication type, and papers picked in the last few days are excluded.
 
-- Python 3.11+
-- PostgreSQL
-- [Ollama](https://ollama.com/) with a model pulled (e.g. `ollama pull llama3.2`)
+**Each paper is scored by its best-matching topic.** Your profile is a list of focused topics. A paper's score is its highest cosine similarity to any one topic, using the biomedical embedding model [`S-PubMedBert-MS-MARCO`](https://huggingface.co/pritamdeka/S-PubMedBert-MS-MARCO). Taking the maximum instead of comparing against an averaged profile keeps niche interests from being drowned out by broad ones.
 
-### Installation
+**Every pick explains itself.** The output records the matched topic and score for each paper, plus run metadata (time window, model, candidate counts), so any selection can be understood and reproduced.
 
-1. Clone the repo and install dependencies:
+## Quickstart
+
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+
 ```bash
 git clone https://github.com/enginboz/paperpulse.git
 cd paperpulse
-poetry install
+uv sync
+cp paperpulse.example.toml paperpulse.toml    # then edit your topics
+export PUBMED_EMAIL=you@example.org           # NCBI asks clients to identify themselves
+
+uv run paperpulse run                          # ingest + select, JSON to stdout
 ```
 
-2. Copy `.env.example` to `.env` and fill in your values:
+The first run downloads the embedding model (~400 MB). On Linux, PyTorch is installed as a CPU-only build.
+
+## Usage
+
 ```bash
-cp .env.example .env
+paperpulse ingest                 # fetch new papers into ./paperpulse.db
+paperpulse select                 # rank and print the digest
+paperpulse select --top 5 -o digest.json
+paperpulse select --no-record     # preview without marking papers as shown
+paperpulse schema                 # JSON schema of the output
 ```
 
-3. Create the PostgreSQL database and tables:
-```bash
-createdb paperpulse
-poetry run python -c "from paperpulse.db import init_db; init_db()"
-```
+Global options: `-c/--config` (default `./paperpulse.toml`), `--db` (default `$PAPERPULSE_DB` or `./paperpulse.db`), `-v/--verbose`. Logs go to stderr, so stdout can be piped, e.g. `paperpulse select | jq '.papers[].title'`.
 
-4. Run the pipeline manually:
-```bash
-poetry run python run.py
-```
+## Output
 
-5. Start the Flask server:
-```bash
-poetry run python paperpulse/app.py
+```json
+{
+  "schema_version": "1",
+  "run": {
+    "id": "3cffdad68d264b109346b5cb3ef3dcd3",
+    "created_at": "2026-09-29T08:51:12.707139Z",
+    "window_start": "2026-09-22",
+    "window_end": "2026-09-29",
+    "embedding_model": "pritamdeka/S-PubMedBert-MS-MARCO",
+    "candidates": 54,
+    "after_filters": 52
+  },
+  "papers": [
+    {
+      "rank": 1,
+      "id": "10.2196/87806",
+      "title": "AI in Neurological Health Care: Qualitative Study of Patient and Public Perceptions.",
+      "journal": "Journal of medical Internet research",
+      "published": "2026-09-24",
+      "authors": ["Tina Bedenik", "Orna Fennelly", "Kathleen Bennett"],
+      "doi": "10.2196/87806",
+      "pmid": "42785740",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/42785740/",
+      "score": {
+        "total": 0.9228,
+        "dense": 0.9228,
+        "matched_topic": "Novel technical approaches enabling clinical AI"
+      }
+    }
+  ]
+}
 ```
-
-The widget is available at `http://localhost:5001`. Past digests can be viewed at `http://localhost:5001/digest/YYYY-MM-DD`.
 
 ## Configuration
 
-Edit `paperpulse/config.py` to customize your interest profile. Each line is treated as a separate topic — the embedding step scores papers against each topic individually and picks the best match, so writing one topic per line gives better results than a single dense paragraph. This profile is also passed to the LLM scoring step.
+`paperpulse.toml` holds your profile, the journals to watch and selection settings; see [`paperpulse.example.toml`](paperpulse.example.toml). Secrets stay in the environment:
 
-Edit the journal lists in `paperpulse/fetchers/pubmed.py` to adjust which journals are included.
+| Variable | Purpose |
+|---|---|
+| `PUBMED_EMAIL` | Contact email sent with NCBI requests (recommended) |
+| `NCBI_API_KEY` | Optional; raises the NCBI rate limit from 3 to 10 requests/s |
+| `PAPERPULSE_DB` | Database path, if not `./paperpulse.db` |
 
-### Environment variables
+## Roadmap
 
-| Variable | Default | Description |
-|---|---|---|
-| `PUBMED_EMAIL` | — | Email sent with PubMed API requests (polite usage) |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
-| `OLLAMA_MODEL` | `llama3.2` | Model name to use for LLM scoring |
-| `DATABASE_URL` | — | PostgreSQL connection string |
-| `LOG_LEVEL` | `INFO` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-| `HF_HUB_OFFLINE` | — | Set to `1` after the embedding model is downloaded to skip HuggingFace network checks on every run. Remove temporarily to pull a fresh model version. |
+- Hybrid retrieval: BM25 keyword search fused with dense scores, for acronyms like FHIR or OMOP
+- Cross-encoder reranking and per-paper LLM assessment with structured output (Ollama by default)
+- Diversity (MMR) so the top picks don't all come from one topic
+- Europe PMC source, including preprints
+- Feedback (👍/👎) and an evaluation set to measure precision@k
+- Optional FastAPI server exposing the digest as a JSON API
 
-## Scheduling
+## Development
 
-Add to crontab to run daily at 6am:
-```
-0 6 * * * /path/to/venv/bin/python /path/to/paperpulse/run.py
+```bash
+uv run pytest
+uv run ruff check . && uv run ruff format --check .
 ```
 
 ## License

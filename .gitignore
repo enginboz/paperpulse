@@ -33,5 +33,10 @@ logs/
 
 # Database
 *.sqlite3
+*.db-journal
 
 NOTES.md
+# PaperPulse local state
+paperpulse.toml
+*.db
+.ruff_cache/

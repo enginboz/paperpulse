@@ -1,0 +1,61 @@
+# PaperPulse configuration. Copy to paperpulse.toml and adapt.
+# Secrets stay in the environment: PUBMED_EMAIL (recommended), NCBI_API_KEY (optional).
+
+[profile]
+# One focused topic per entry. Each paper is scored against every topic and
+# keeps its best match, so several narrow topics beat one long paragraph.
+topics = [
+    "AI clinical decision support",
+    "Tumor board decision support AI",
+    "AI-assisted diagnosis",
+    "Clinical outcome prediction",
+    "NLP applied to clinical notes",
+    "NLP for medical documentation and discharge summaries",
+    "Information extraction from clinical text",
+    "Electronic health record systems and EHR integration",
+    "Health data interoperability standards",
+    "FHIR implementation and clinical data exchange",
+    "Digital therapeutics",
+    "Real-world clinical AI applications",
+    "Novel technical approaches enabling clinical AI",
+]
+
+[sources.pubmed]
+# Everything published in these journals is ingested.
+journals = [
+    "npj Digital Medicine",
+    "Lancet Digital Health",
+    "Journal of Medical Internet Research",
+    "Journal of the American Medical Informatics Association",
+    "Journal of Biomedical Informatics",
+    "Patterns",
+    "PLOS Digital Health",
+]
+
+[sources.pubmed.filtered]
+# High-volume general journals: only papers matching a keyword are ingested.
+journals = ["Nature Medicine", "New England Journal of Medicine", "JAMA"]
+keywords = [
+    "artificial intelligence",
+    "machine learning",
+    "deep learning",
+    "large language model",
+    "natural language processing",
+    "digital health",
+    "clinical decision support",
+    "wearable",
+    "electronic health record",
+    "EHR",
+    "mHealth",
+    "telemedicine",
+    "digital therapeutics",
+]
+
+[selection]
+top = 3
+window_days = 7      # consider papers added to PubMed in the last N days
+no_repeat_days = 7   # don't pick papers selected in the last N days
+# exclude_publication_types = [...]  # defaults to editorials, comments, errata, letters, ...
+
+[embedding]
+model = "pritamdeka/S-PubMedBert-MS-MARCO"

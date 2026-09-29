@@ -1,0 +1,75 @@
+<?xml version="1.0" ?>
+<!DOCTYPE PubmedArticleSet PUBLIC "-//NLM//DTD PubMedArticle, 1st January 2025//EN" "https://dtd.nlm.nih.gov/ncbi/pubmed/out/pubmed_250101.dtd">
+<PubmedArticleSet>
+  <!-- Research article: DOI, structured abstract with inline markup, electronic date -->
+  <PubmedArticle>
+    <MedlineCitation Status="PubMed-not-MEDLINE" Owner="NLM">
+      <PMID Version="1">40000001</PMID>
+      <Article PubModel="Electronic">
+        <Journal>
+          <JournalIssue CitedMedium="Internet">
+            <Volume>9</Volume>
+            <PubDate><Year>2026</Year><Month>Oct</Month></PubDate>
+          </JournalIssue>
+          <Title>NPJ digital medicine</Title>
+        </Journal>
+        <ArticleTitle>Large language models for <i>FHIR</i> resource extraction from discharge summaries.</ArticleTitle>
+        <Abstract>
+          <AbstractText Label="BACKGROUND">Clinical notes are unstructured.</AbstractText>
+          <AbstractText Label="METHODS">HbA<sub>1c</sub> values were mapped to FHIR resources.</AbstractText>
+        </Abstract>
+        <AuthorList CompleteYN="Y">
+          <Author ValidYN="Y"><LastName>Doe</LastName><ForeName>Jane</ForeName></Author>
+          <Author ValidYN="Y"><CollectiveName>The FHIR Consortium</CollectiveName></Author>
+          <Author ValidYN="Y"><LastName>Roe</LastName><ForeName>Max</ForeName></Author>
+        </AuthorList>
+        <PublicationTypeList>
+          <PublicationType UI="D016428">Journal Article</PublicationType>
+        </PublicationTypeList>
+        <ArticleDate DateType="Electronic"><Year>2026</Year><Month>09</Month><Day>24</Day></ArticleDate>
+      </Article>
+    </MedlineCitation>
+    <PubmedData>
+      <History>
+        <PubMedPubDate PubStatus="received"><Year>2026</Year><Month>3</Month><Day>1</Day></PubMedPubDate>
+        <PubMedPubDate PubStatus="entrez"><Year>2026</Year><Month>9</Month><Day>25</Day><Hour>6</Hour></PubMedPubDate>
+      </History>
+      <ArticleIdList>
+        <ArticleId IdType="pubmed">40000001</ArticleId>
+        <ArticleId IdType="doi">10.1038/S41746-026-00001-X</ArticleId>
+      </ArticleIdList>
+    </PubmedData>
+  </PubmedArticle>
+
+  <!-- Editorial: no DOI, no abstract, only a coarse issue date -->
+  <PubmedArticle>
+    <MedlineCitation Status="MEDLINE" Owner="NLM">
+      <PMID Version="1">40000002</PMID>
+      <Article PubModel="Print">
+        <Journal>
+          <JournalIssue CitedMedium="Print">
+            <PubDate><Year>2026</Year><Month>Sep</Month></PubDate>
+          </JournalIssue>
+          <Title>JAMA</Title>
+        </Journal>
+        <ArticleTitle>The promise of AI at the bedside.</ArticleTitle>
+        <PublicationTypeList>
+          <PublicationType UI="D016421">Editorial</PublicationType>
+        </PublicationTypeList>
+      </Article>
+    </MedlineCitation>
+    <PubmedData>
+      <History>
+        <PubMedPubDate PubStatus="entrez"><Year>2026</Year><Month>9</Month><Day>26</Day></PubMedPubDate>
+      </History>
+      <ArticleIdList>
+        <ArticleId IdType="pubmed">40000002</ArticleId>
+      </ArticleIdList>
+    </PubmedData>
+  </PubmedArticle>
+
+  <!-- Book chapters are a different record type and must be ignored -->
+  <PubmedBookArticle>
+    <BookDocument><PMID Version="1">40000003</PMID></BookDocument>
+  </PubmedBookArticle>
+</PubmedArticleSet>
