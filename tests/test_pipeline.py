@@ -1,7 +1,8 @@
 from datetime import UTC, date, datetime, timedelta
 
+from paperpulse.llm import LLMUnavailable
 from paperpulse.pipeline import ingest, select
-from tests.conftest import make_paper
+from tests.conftest import FakeLLM, make_paper
 
 NOW = datetime(2026, 9, 29, 6, tzinfo=UTC)
 
@@ -102,3 +103,39 @@ def test_failed_ingest_keeps_watermark(store):
         pass
     assert store.last_ingested("fake") is None
     assert store.papers_added_between(date(2026, 9, 1), date(2026, 9, 30)) == []
+
+
+def test_llm_relevance_overrides_dense_order(store, config, embedder):
+    seed(store)
+    llm = FakeLLM({"Knee surgery outcomes": 5, "NLP on clinical notes": 4})
+    digest = select(store, config, embedder, llm=llm, now=NOW)
+
+    assert [p.pmid for p in digest.papers] == ["3", "2"]
+    assert digest.papers[0].score.assessment.relevance == 5
+    assert digest.papers[0].score.total == round(5 + digest.papers[0].score.dense, 4)
+    assert digest.run.llm_model == "fake-llm"
+
+
+def test_llm_drops_papers_below_min_relevance(store, config, embedder):
+    seed(store)
+    digest = select(store, config, embedder, llm=FakeLLM({"NLP on clinical notes": 3}), now=NOW)
+    assert [p.pmid for p in digest.papers] == ["2"]
+
+
+def test_llm_only_assesses_the_dense_shortlist(store, config, embedder):
+    seed(store)
+    config.llm.candidates = 2
+    llm = FakeLLM()
+    select(store, config, embedder, llm=llm, now=NOW)
+    assessed = {user.splitlines()[0] for _, user in llm.calls}
+    assert "Title: Knee surgery outcomes" not in assessed
+    assert len(assessed) == 2
+
+
+def test_llm_unavailable_falls_back_to_dense(store, config, embedder):
+    seed(store)
+    llm = FakeLLM(responses=iter([LLMUnavailable("down")]))
+    digest = select(store, config, embedder, llm=llm, now=NOW)
+    assert {p.pmid for p in digest.papers} == {"1", "2"}
+    assert digest.run.llm_model is None
+    assert digest.papers[0].score.assessment is None

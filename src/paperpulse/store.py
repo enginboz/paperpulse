@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from paperpulse.models import Digest, Paper
+from paperpulse.models import Assessment, Digest, Paper
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS papers (
@@ -39,6 +39,13 @@ CREATE TABLE IF NOT EXISTS embeddings (
     model    TEXT NOT NULL,
     vector   BLOB NOT NULL,
     PRIMARY KEY (paper_id, model)
+);
+
+CREATE TABLE IF NOT EXISTS assessments (
+    paper_id   TEXT NOT NULL REFERENCES papers(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    key        TEXT NOT NULL,
+    assessment TEXT NOT NULL,
+    PRIMARY KEY (paper_id, key)
 );
 
 CREATE TABLE IF NOT EXISTS ingest_state (
@@ -91,6 +98,7 @@ class Store:
                     new += 1
                 elif (old["title"], old["abstract"]) != (p.title, p.abstract):
                     self.db.execute("DELETE FROM embeddings WHERE paper_id = ?", (p.id,))
+                    self.db.execute("DELETE FROM assessments WHERE paper_id = ?", (p.id,))
                 self.db.execute(
                     f"INSERT INTO papers ({PAPER_COLUMNS}) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
@@ -150,6 +158,29 @@ class Store:
             self.db.executemany(
                 "INSERT OR REPLACE INTO embeddings (paper_id, model, vector) VALUES (?, ?, ?)",
                 [(pid, model, v.astype(np.float32).tobytes()) for pid, v in vectors.items()],
+            )
+
+    # -- LLM assessments ---------------------------------------------------
+
+    def get_assessments(self, paper_ids: list[str], key: str) -> dict[str, Assessment]:
+        found = {}
+        for chunk in _chunks(paper_ids, 500):
+            marks = ",".join("?" * len(chunk))
+            rows = self.db.execute(
+                f"SELECT paper_id, assessment FROM assessments "
+                f"WHERE key = ? AND paper_id IN ({marks})",
+                (key, *chunk),
+            )
+            found.update(
+                {r["paper_id"]: Assessment.model_validate_json(r["assessment"]) for r in rows}
+            )
+        return found
+
+    def put_assessment(self, paper_id: str, key: str, assessment: Assessment) -> None:
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO assessments (paper_id, key, assessment) VALUES (?, ?, ?)",
+                (paper_id, key, assessment.model_dump_json()),
             )
 
     # -- ingestion watermark -----------------------------------------------

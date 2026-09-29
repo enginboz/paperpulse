@@ -29,6 +29,31 @@ class FakeEmbedder:
         return out / np.where(norms == 0, 1, norms)
 
 
+class FakeLLM:
+    """Rates a paper by looking up its title in `ratings`; unknown titles get 1."""
+
+    name = "fake-llm"
+
+    def __init__(self, ratings: dict[str, int] | None = None, responses=None):
+        self.ratings = ratings or {}
+        self.responses = responses  # optional iterator of raw responses, overrides ratings
+        self.calls: list[tuple[str, str]] = []
+
+    def complete(self, system: str, user: str, output):
+        self.calls.append((system, user))
+        if self.responses is not None:
+            response = next(self.responses)
+            if isinstance(response, Exception):
+                raise response
+            return output.model_validate(response)
+        title = user.splitlines()[0].removeprefix("Title: ")
+        return output(
+            study_type="original_research",
+            rationale=f"Rated {title}.",
+            relevance=self.ratings.get(title, 1),
+        )
+
+
 def make_paper(n: int, title: str = "", abstract: str = "abstract", **kwargs) -> Paper:
     defaults = dict(
         id=canonical_id(None, str(n)),
@@ -53,6 +78,11 @@ def store():
 @pytest.fixture
 def embedder():
     return FakeEmbedder()
+
+
+@pytest.fixture
+def llm():
+    return FakeLLM()
 
 
 @pytest.fixture

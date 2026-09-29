@@ -19,6 +19,11 @@ topics = [
     "Real-world clinical AI applications",
     "Novel technical approaches enabling clinical AI",
 ]
+# Free-text guidance for the LLM stage: what makes a paper worth your time.
+preferences = """
+Prefer original research that presents new methods, systems, datasets or evaluated results.
+Perspectives, commentaries and studies that only survey attitudes towards AI are less useful.
+"""
 
 [sources.pubmed]
 # Everything published in these journals is ingested.
@@ -59,3 +64,21 @@ no_repeat_days = 7   # don't pick papers selected in the last N days
 
 [embedding]
 model = "pritamdeka/S-PubMedBert-MS-MARCO"
+
+[llm]
+# Each shortlisted paper is assessed by an LLM against your profile.
+# Set enabled = false, or pass --no-llm, to rank by embedding similarity only.
+enabled = true
+
+# Local (default): Ollama (https://ollama.com), run `ollama pull mistral` first.
+# Nothing leaves your machine, but expect ~30-60 s per paper on a laptop CPU.
+provider = "ollama"
+model = "mistral"
+
+# Cloud: Claude via the Anthropic API. Seconds per paper; only public abstracts are sent.
+# Requires `uv sync --extra anthropic` and ANTHROPIC_API_KEY.
+# provider = "anthropic"
+# model = "claude-opus-5-5"   # or e.g. "claude-haiku-4-5" for lower cost
+# effort = "low"
+candidates = 12      # the LLM assesses this many top papers by similarity
+min_relevance = 3    # 1-5; papers rated lower are never shown

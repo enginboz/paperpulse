@@ -19,6 +19,7 @@ from pathlib import Path
 
 from paperpulse.config import Config, load_config
 from paperpulse.embeddings import SentenceTransformerEmbedder
+from paperpulse.llm import LLM, create_llm
 from paperpulse.models import Digest
 from paperpulse.pipeline import ingest, select
 from paperpulse.sources import PubMedSource
@@ -60,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
                 store,
                 config,
                 SentenceTransformerEmbedder(config.embedding.model),
+                llm=None if args.no_llm or not config.llm.enabled else _llm(config),
                 record=not args.no_record,
             )
             _write(digest, args.output)
@@ -73,6 +75,10 @@ def main(argv: list[str] | None = None) -> int:
 def _ingest(store: Store, config: Config, days: int | None) -> None:
     sources = [PubMedSource(config.sources.pubmed)]
     ingest(store, sources, default_days=days or config.selection.window_days, today=date.today())
+
+
+def _llm(config: Config) -> LLM:
+    return create_llm(config.llm)
 
 
 def _write(digest: Digest, output: Path | None) -> None:
@@ -110,6 +116,9 @@ def _parser() -> argparse.ArgumentParser:
     select_args = argparse.ArgumentParser(add_help=False)
     select_args.add_argument("--top", type=int, help="number of papers (default: selection.top)")
     select_args.add_argument("-o", "--output", type=Path, help="write JSON here instead of stdout")
+    select_args.add_argument(
+        "--no-llm", action="store_true", help="skip the LLM stage and rank by similarity only"
+    )
     select_args.add_argument(
         "--no-record",
         action="store_true",

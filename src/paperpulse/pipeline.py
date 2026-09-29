@@ -4,7 +4,8 @@ The two halves of PaperPulse.
 ingest()  pulls new papers from each source into the store. It is incremental
           and idempotent: each source resumes from its last watermark.
 select()  ranks stored papers against the profile and returns a Digest. It
-          never touches the network, so it can be re-run freely while tuning.
+          only talks to the local LLM, and every model output is cached, so it
+          can be re-run freely while tuning.
 """
 
 import logging
@@ -13,7 +14,9 @@ from datetime import UTC, date, datetime, timedelta
 
 from paperpulse.config import Config
 from paperpulse.embeddings import Embedder, embed_papers
-from paperpulse.models import Digest, RankedPaper, RunInfo, Score
+from paperpulse.llm import LLM, LLMUnavailable
+from paperpulse.models import Digest, Paper, RankedPaper, RunInfo, Score
+from paperpulse.ranking.assess import assess_papers
 from paperpulse.ranking.dense import best_topic_matches
 from paperpulse.ranking.filters import apply_filters
 from paperpulse.sources import Source
@@ -45,6 +48,7 @@ def select(
     store: Store,
     config: Config,
     embedder: Embedder,
+    llm: LLM | None = None,
     now: datetime | None = None,
     record: bool = True,
 ) -> Digest:
@@ -58,26 +62,49 @@ def select(
     eligible = apply_filters(candidates, sel, exclude_ids=recent)
     logger.info("%d candidates, %d after filters", len(candidates), len(eligible))
 
-    ranked: list[RankedPaper] = []
+    scored: list[tuple[Paper, Score]] = []
+    llm_used = None
     if eligible:
         topics = config.profile.topics
         matches = best_topic_matches(
             embed_papers(store, embedder, eligible), embedder.encode(topics)
         )
-        order = sorted(range(len(eligible)), key=lambda i: matches[i].score, reverse=True)
-        for rank, i in enumerate(order[: sel.top], 1):
-            p, m = eligible[i], matches[i]
-            ranked.append(
-                RankedPaper(
-                    rank=rank,
-                    **p.model_dump(include=RANKED_FIELDS),
-                    score=Score(
-                        total=round(m.score, 4),
-                        dense=round(m.score, 4),
-                        matched_topic=topics[m.topic_index],
-                    ),
+        dense = [
+            (p, Score(total=m.score, dense=m.score, matched_topic=topics[m.topic_index]))
+            for p, m in zip(eligible, matches, strict=True)
+        ]
+        dense.sort(key=lambda ps: ps[1].dense, reverse=True)
+        scored = dense
+
+        if llm is not None:
+            shortlist = dense[: config.llm.candidates]
+            try:
+                assessments = assess_papers(store, llm, config.profile, [p for p, _ in shortlist])
+                llm_used = llm.name
+            except LLMUnavailable as e:
+                logger.warning("%s; ranking by embedding similarity only", e)
+            else:
+                scored = [
+                    (p, s.model_copy(update={"total": a.relevance + s.dense, "assessment": a}))
+                    for p, s in shortlist
+                    if (a := assessments.get(p.id)) and a.relevance >= config.llm.min_relevance
+                ]
+                logger.info(
+                    "%d of %d shortlisted papers rated relevance >= %d",
+                    len(scored),
+                    len(shortlist),
+                    config.llm.min_relevance,
                 )
-            )
+                scored.sort(key=lambda ps: ps[1].total, reverse=True)
+
+    ranked = [
+        RankedPaper(
+            rank=rank,
+            **p.model_dump(include=RANKED_FIELDS),
+            score=s.model_copy(update={"total": round(s.total, 4), "dense": round(s.dense, 4)}),
+        )
+        for rank, (p, s) in enumerate(scored[: sel.top], 1)
+    ]
 
     digest = Digest(
         run=RunInfo(
@@ -86,6 +113,7 @@ def select(
             window_start=window_start,
             window_end=window_end,
             embedding_model=embedder.name,
+            llm_model=llm_used,
             candidates=len(candidates),
             after_filters=len(eligible),
         ),

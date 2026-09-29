@@ -20,6 +20,11 @@ paperpulse = "paperpulse.cli:main"
 [project.urls]
 Repository = "https://github.com/enginboz/paperpulse"
 
+[project.optional-dependencies]
+anthropic = [
+    "anthropic>=1.9.0",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",

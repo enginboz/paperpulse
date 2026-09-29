@@ -7,6 +7,7 @@ versioned JSON schema (`paperpulse schema`).
 """
 
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -44,12 +45,38 @@ def canonical_id(doi: str | None, pmid: str | None) -> str:
     raise ValueError("a paper needs a DOI or a PMID")
 
 
-class Score(BaseModel):
-    """Why a paper ranked where it did. Stages add fields as the pipeline grows."""
+StudyType = Literal[
+    "original_research",
+    "systematic_review",
+    "narrative_review",
+    "qualitative_or_survey",
+    "perspective_or_commentary",
+    "protocol",
+    "other",
+]
 
-    total: float
+
+class Assessment(BaseModel):
+    """
+    An LLM's judgement of one paper. Field order is generation order,
+    so the model states its reasoning before committing to a score.
+    """
+
+    study_type: StudyType
+    rationale: str = Field(description="One sentence on why this paper does or does not matter")
+    relevance: int = Field(ge=1, le=5)
+
+
+class Score(BaseModel):
+    """Why a paper ranked where it did."""
+
+    total: float = Field(
+        description="LLM relevance (1-5) plus dense similarity as tie-breaker; "
+        "dense similarity alone when the LLM stage did not run"
+    )
     dense: float = Field(description="Cosine similarity to the best-matching topic")
     matched_topic: str
+    assessment: Assessment | None = None
 
 
 class RankedPaper(BaseModel):
@@ -73,6 +100,7 @@ class RunInfo(BaseModel):
     window_start: date
     window_end: date
     embedding_model: str
+    llm_model: str | None = Field(default=None, description="None when the LLM stage was skipped")
     candidates: int = Field(description="Papers in the time window before filtering")
     after_filters: int = Field(description="Papers left after the hard filters")
 
