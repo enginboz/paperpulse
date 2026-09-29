@@ -50,6 +50,8 @@ The first run downloads the embedding model (~400 MB). On Linux, PyTorch is inst
 
 ## Usage
 
+The `paperpulse` command lives in the project environment. Prefix commands with `uv run` (as in the Quickstart), activate the environment with `source .venv/bin/activate`, or install it globally with `uv tool install --editable .`; the examples below omit the prefix.
+
 ```bash
 paperpulse ingest                 # fetch new papers into ./paperpulse.db
 paperpulse select                 # rank and print the digest
