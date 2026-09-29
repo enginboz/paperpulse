@@ -91,7 +91,10 @@ def _write(digest: Digest, output: Path | None) -> None:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="paperpulse", description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(
+        prog="paperpulse",
+        description="Surface the most relevant new papers for your research interests.",
+    )
     parser.add_argument(
         "-c",
         "--config",
