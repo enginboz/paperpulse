@@ -1,5 +1,5 @@
 # PaperPulse configuration. Copy to paperpulse.toml and adapt.
-# Secrets stay in the environment: PUBMED_EMAIL (recommended), NCBI_API_KEY (optional).
+# Personal values and secrets (PUBMED_EMAIL, API keys) go in .env, see .env.example.
 
 [profile]
 # One focused topic per entry. Each paper is scored against every topic and

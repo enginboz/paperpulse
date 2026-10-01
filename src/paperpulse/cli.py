@@ -11,6 +11,7 @@ Command-line interface.
     paperpulse labels export     write labels as JSONL (also: labels import FILE)
 
 The digest goes to stdout and logs go to stderr, so output can be piped.
+Environment variables can also be set in a .env file in the working directory.
 """
 
 import argparse
@@ -21,6 +22,8 @@ import sys
 from dataclasses import asdict
 from datetime import date
 from pathlib import Path
+
+from dotenv import find_dotenv, load_dotenv
 
 from paperpulse.config import Config, load_config
 from paperpulse.embeddings import SentenceTransformerEmbedder
@@ -42,6 +45,9 @@ logger = logging.getLogger("paperpulse")
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Before parsing: argument defaults such as --db read the environment.
+    # Variables already set in the shell take precedence over the file.
+    load_dotenv(find_dotenv(usecwd=True))
     args = _parser().parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,

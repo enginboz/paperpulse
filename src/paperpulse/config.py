@@ -1,8 +1,8 @@
 """
 Configuration, loaded from a TOML file (default: ./paperpulse.toml).
 
-Secrets and machine-specific values come from environment variables so
-the TOML file can be shared or committed:
+Secrets and personal values come from environment variables, or a .env file
+in the working directory, so the TOML file can be shared or committed:
 
     PUBMED_EMAIL       contact email sent with NCBI requests (they ask for one)
     NCBI_API_KEY       optional, raises the NCBI rate limit from 3 to 10 req/s

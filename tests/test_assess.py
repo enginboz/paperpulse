@@ -1,3 +1,4 @@
+import importlib.util
 import json
 from types import SimpleNamespace
 
@@ -108,6 +109,12 @@ def test_ollama_connection_error_is_unavailable():
         _ollama(handler).complete("s", "u", Assessment)
 
 
+requires_anthropic = pytest.mark.skipif(
+    importlib.util.find_spec("anthropic") is None,
+    reason="optional dependency: uv sync --extra anthropic",
+)
+
+
 class FakeAnthropicClient:
     """Stands in for anthropic.Anthropic(); records the request and returns a canned response."""
 
@@ -128,6 +135,7 @@ def _parsed(stop_reason="end_turn", parsed=None):
     return SimpleNamespace(stop_reason=stop_reason, parsed_output=parsed)
 
 
+@requires_anthropic
 def test_anthropic_requests_structured_output_with_fallback():
     client = FakeAnthropicClient(_parsed(parsed=Assessment(**VALID)))
     llm = AnthropicLLM("claude-opus-5-5", "low", client=client)
@@ -140,12 +148,14 @@ def test_anthropic_requests_structured_output_with_fallback():
     assert client.kwargs["betas"] == ["server-side-fallback-2026-07-01"]
 
 
+@requires_anthropic
 def test_anthropic_refusal_is_a_bad_response_not_an_outage():
     llm = AnthropicLLM("m", "low", client=FakeAnthropicClient(_parsed("refusal")))
     with pytest.raises(ValueError, match="declined"):
         llm.complete("s", "u", Assessment)
 
 
+@requires_anthropic
 def test_anthropic_connection_error_is_unavailable():
     import anthropic
     import httpx2

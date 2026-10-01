@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import date
 
 from paperpulse import cli
@@ -33,3 +34,24 @@ def test_select_prints_json_digest(tmp_path, capsys, monkeypatch):
     assert digest["papers"][0]["pmid"] == "1"
     assert digest["papers"][0]["score"]["assessment"]["relevance"] == 5
     assert digest["run"]["llm_model"] == "fake-llm"
+
+
+def test_dotenv_in_working_directory_is_loaded(tmp_path, monkeypatch, capsys):
+    # setenv then delenv: the variables start unset, and teardown removes what .env adds
+    for var in ("PAPERPULSE_DB", "PUBMED_EMAIL"):
+        monkeypatch.setenv(var, "placeholder")
+        monkeypatch.delenv(var)
+    monkeypatch.setattr(cli, "SentenceTransformerEmbedder", lambda _: FakeEmbedder())
+    (tmp_path / ".env").write_text("PAPERPULSE_DB=from-dotenv.db\nPUBMED_EMAIL=me@example.org\n")
+    (tmp_path / "paperpulse.toml").write_text('[profile]\ntopics = ["x"]\n[llm]\nenabled = false\n')
+
+    assert cli.main(["select"]) == 0
+    assert (tmp_path / "from-dotenv.db").exists()
+    assert os.environ["PUBMED_EMAIL"] == "me@example.org"
+
+
+def test_shell_variables_win_over_dotenv(tmp_path, monkeypatch):
+    monkeypatch.setenv("PUBMED_EMAIL", "shell@example.org")
+    (tmp_path / ".env").write_text("PUBMED_EMAIL=file@example.org\n")
+    cli.main(["schema"])
+    assert os.environ["PUBMED_EMAIL"] == "shell@example.org"

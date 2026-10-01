@@ -41,12 +41,12 @@ git clone https://github.com/enginboz/paperpulse.git
 cd paperpulse
 uv sync
 cp paperpulse.example.toml paperpulse.toml    # then edit your topics
-export PUBMED_EMAIL=you@example.org           # NCBI asks clients to identify themselves
+cp .env.example .env                          # then set PUBMED_EMAIL (NCBI asks for one)
 
 uv run paperpulse run                          # ingest + select, JSON to stdout
 ```
 
-The first run downloads the embedding model (~400 MB). On Linux, PyTorch is installed as a CPU-only build. To use Claude instead of a local model, run `uv sync --extra anthropic`, set `ANTHROPIC_API_KEY` and switch `[llm] provider = "anthropic"` in the config.
+The first run downloads the embedding model (~400 MB). On Linux, PyTorch is installed as a CPU-only build. To use Claude instead of a local model, run `uv sync --extra anthropic`, set `ANTHROPIC_API_KEY` in `.env` and switch `[llm] provider = "anthropic"` in the config.
 
 ## Usage
 
@@ -147,7 +147,7 @@ The LLM variant uses cached assessments by default, so evaluation is instant; `-
 
 ## Configuration
 
-`paperpulse.toml` holds your profile, the journals to watch and selection settings; see [`paperpulse.example.toml`](paperpulse.example.toml). Secrets stay in the environment:
+`paperpulse.toml` holds your profile, the journals to watch and selection settings; see [`paperpulse.example.toml`](paperpulse.example.toml). Personal values and secrets stay out of it, in environment variables or a `.env` file in the working directory (see [`.env.example`](.env.example)); variables set in the shell take precedence:
 
 | Variable | Purpose |
 |---|---|

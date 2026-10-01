@@ -68,6 +68,12 @@ def make_paper(n: int, title: str = "", abstract: str = "abstract", **kwargs) ->
     return Paper(**{**defaults, **kwargs})
 
 
+@pytest.fixture(autouse=True)
+def isolated_cwd(tmp_path, monkeypatch):
+    """Run every test in an empty directory, so the CLI never picks up a developer's .env."""
+    monkeypatch.chdir(tmp_path)
+
+
 @pytest.fixture
 def store():
     s = Store(":memory:")
