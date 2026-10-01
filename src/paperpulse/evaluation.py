@@ -25,9 +25,13 @@ and is scored on
                  count as not relevant, so low coverage means label more
 """
 
+import hashlib
+import json
 import logging
-from dataclasses import dataclass, field
-from datetime import date, timedelta
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, date, datetime, timedelta
+from importlib.metadata import version
+from pathlib import Path
 from statistics import mean
 
 from paperpulse.config import Config
@@ -35,7 +39,7 @@ from paperpulse.embeddings import Embedder
 from paperpulse.llm import LLM
 from paperpulse.models import Label, Paper
 from paperpulse.pipeline import rank_papers, window_start
-from paperpulse.ranking.assess import cache_key
+from paperpulse.ranking.assess import PROMPT_VERSION, cache_key
 from paperpulse.ranking.filters import apply_filters
 from paperpulse.ranking.keyword import best_keyword_matches
 from paperpulse.store import Store
@@ -98,6 +102,8 @@ class WindowScore:
     judged: float | None
     returned: int
     assessed: float | None = None
+    top: list[str] = field(default_factory=list)
+    """Ids of the papers this variant would show, so a result can be checked paper by paper."""
 
 
 @dataclass
@@ -183,6 +189,7 @@ def evaluate(
                     judged=sum(pid in labels for pid in top) / len(top) if top else None,
                     returned=len(top),
                     assessed=assessed,
+                    top=top,
                 )
             )
     return results
@@ -225,3 +232,98 @@ def format_report(results: list[VariantResult], k: int, n: int) -> str:
             "Run `paperpulse label` to widen coverage."
         )
     return "\n".join(lines)
+
+
+# -- saved results ---------------------------------------------------------
+
+RESULT_SCHEMA_VERSION = "1"
+
+
+def evaluation_record(
+    results: list[VariantResult],
+    config: Config,
+    llms: list[LLM],
+    labels_jsonl: str,
+    k: int,
+    cached_only: bool,
+    now: datetime | None = None,
+) -> dict:
+    """
+    Everything needed to trust or re-check a result: what was measured, with
+    which setup, on which labels (by checksum of the exported label set), and
+    which papers each variant picked.
+    """
+    incomplete = []
+    if not llms:
+        incomplete.append("no LLM variant evaluated")
+    for r in results:
+        if r.unavailable:
+            incomplete.append(f"{r.name}: LLM unavailable")
+        elif (cov := r.mean("assessed")) is not None and cov < 1:
+            incomplete.append(f"{r.name}: only {cov:.0%} of shortlist assessed")
+
+    profile_json = json.dumps(config.profile.model_dump(), sort_keys=True)
+    label_lines = [json.loads(line) for line in labels_jsonl.splitlines() if line.strip()]
+    windows = results[0].windows if results else []
+    return {
+        "schema_version": RESULT_SCHEMA_VERSION,
+        "created_at": (now or datetime.now(UTC)).isoformat(timespec="seconds"),
+        "paperpulse_version": version("paperpulse"),
+        "complete": not incomplete,
+        "incomplete_reasons": incomplete,
+        "setup": {
+            "embedding_model": config.embedding.model,
+            "llm_provider": config.llm.provider if llms else None,
+            "llm_models": [llm.name for llm in llms],
+            "prompt_version": PROMPT_VERSION,
+            "profile_sha256": hashlib.sha256(profile_json.encode()).hexdigest()[:16],
+            "k": k,
+            "shortlist_size": config.llm.candidates,
+            "min_relevance": config.llm.min_relevance,
+            "window_days": config.selection.window_days,
+            "rrf_k": config.retrieval.rrf_k,
+            "cached_only": cached_only,
+        },
+        "labels": {
+            "total": len(label_lines),
+            "relevant": sum(1 for r in label_lines if r["relevant"]),
+            "sha256": hashlib.sha256(labels_jsonl.encode()).hexdigest()[:16],
+        },
+        "summary": {
+            r.name: None
+            if r.unavailable
+            else {m: r.mean(m) for m in ("precision", "recall", "judged")}
+            for r in results
+        },
+        "windows": [
+            {
+                "start": w.start.isoformat(),
+                "end": w.end.isoformat(),
+                "relevant": w.relevant,
+                "variants": {
+                    r.name: {
+                        key: value
+                        for key, value in asdict(r.windows[i]).items()
+                        if key not in ("start", "end", "relevant")
+                    }
+                    for r in results
+                    if not r.unavailable
+                },
+            }
+            for i, w in enumerate(windows)
+        ],
+    }
+
+
+def save_evaluation(record: dict, labels_jsonl: str, directory: Path) -> Path:
+    """
+    Write the result as results/<timestamp>.json and refresh labels.jsonl next
+    to it, so the label set that produced the newest result is always on disk.
+    """
+    results_dir = directory / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.fromisoformat(record["created_at"]).strftime("%Y-%m-%dT%H%M%S")
+    path = results_dir / f"{stamp}.json"
+    path.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n")
+    (directory / "labels.jsonl").write_text(labels_jsonl)
+    return path

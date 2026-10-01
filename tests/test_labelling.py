@@ -157,3 +157,26 @@ def test_cli_eval_compares_requested_models(tmp_path, monkeypatch, capsys):
     assert cli.main([*base, "eval", "--models", "mistral", "llama3.2"]) == 0
     report = capsys.readouterr().out
     assert "hybrid+mistral" in report and "hybrid+llama3.2" in report
+
+
+def test_cli_eval_saves_by_default_and_not_with_no_save(tmp_path, monkeypatch, capsys):
+    base = _cli_setup(tmp_path, monkeypatch, "[llm]\nenabled = false\n")
+    s = Store(tmp_path / "pp.db")
+    s.set_label(Label(paper_id="pmid:1", relevant=True, source="pool", labelled_at=NOW))
+    s.close()
+
+    assert cli.main([*base, "eval", "--no-save"]) == 0
+    assert not (tmp_path / "evaluation").exists()
+
+    assert cli.main([*base, "eval"]) == 0
+    saved = list((tmp_path / "evaluation" / "results").glob("*.json"))
+    assert len(saved) == 1
+    record = json.loads(saved[0].read_text())
+    assert record["complete"] is False  # LLM disabled in this config
+    assert json.loads((tmp_path / "evaluation" / "labels.jsonl").read_text())["id"] == "pmid:1"
+
+
+def test_cli_eval_without_labels_saves_nothing(tmp_path, monkeypatch):
+    base = _cli_setup(tmp_path, monkeypatch, "[llm]\nenabled = false\n")
+    assert cli.main([*base, "eval"]) == 0
+    assert not (tmp_path / "evaluation").exists()

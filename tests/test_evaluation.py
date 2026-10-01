@@ -130,3 +130,69 @@ def test_unreachable_llm_is_reported_not_disguised_as_hybrid(store, config, embe
     assert result.unavailable and result.windows == []
     report = format_report([*_, result], k=1, n=12)
     assert "hybrid+fake-llm" in report and "LLM unavailable" in report
+
+
+def test_record_documents_setup_labels_and_picks(store, config, embedder):
+    import hashlib
+    import json
+
+    from paperpulse.evaluation import evaluation_record
+    from paperpulse.labelling import export_labels
+
+    seed_hl7_week(store, config)
+    label(store, "pmid:1", False)
+    label(store, "pmid:2", True)
+    llm = FakeLLM({"Interface engines": 5})
+    results = evaluate(store, config, embedder, llms=[llm], k=1)
+    labels_jsonl = "".join(line + "\n" for line in export_labels(store))
+
+    record = evaluation_record(
+        results, config, [llm], labels_jsonl, k=1, cached_only=False, now=NOW
+    )
+
+    assert record["complete"] and record["incomplete_reasons"] == []
+    assert record["created_at"] == "2026-09-29T00:00:00+00:00"
+    assert record["setup"]["llm_models"] == ["fake-llm"]
+    assert record["setup"]["k"] == 1
+    assert record["labels"] == {
+        "total": 2,
+        "relevant": 1,
+        "sha256": hashlib.sha256(labels_jsonl.encode()).hexdigest()[:16],
+    }
+    assert record["summary"]["dense"]["precision"] == 0.0
+    assert record["summary"]["hybrid+fake-llm"]["precision"] == 1.0
+    window = record["windows"][0]
+    assert window["variants"]["dense"]["top"] == ["pmid:1"]
+    assert window["variants"]["hybrid+fake-llm"]["top"] == ["pmid:2"]
+    json.dumps(record)  # must be serialisable as is
+
+
+def test_record_flags_incomplete_runs(store, config, embedder):
+    from paperpulse.evaluation import evaluation_record
+
+    seed_hl7_week(store, config)
+    label(store, "pmid:2", True)
+
+    no_llm = evaluation_record(evaluate(store, config, embedder), config, [], "", 1, False)
+    assert not no_llm["complete"]
+    assert no_llm["incomplete_reasons"] == ["no LLM variant evaluated"]
+
+    llm = FakeLLM()
+    cached = evaluate(store, config, embedder, llms=[llm], k=1, cached_only=True)
+    record = evaluation_record(cached, config, [llm], "", 1, cached_only=True)
+    assert not record["complete"]
+    assert "hybrid+fake-llm: only 0% of shortlist assessed" in record["incomplete_reasons"]
+    assert record["setup"]["cached_only"] is True
+
+
+def test_save_writes_timestamped_result_and_label_set(tmp_path):
+    import json
+
+    from paperpulse.evaluation import save_evaluation
+
+    record = {"created_at": "2026-10-01T15:30:12+00:00", "complete": True}
+    path = save_evaluation(record, '{"id": "x"}\n', tmp_path / "evaluation")
+
+    assert path == tmp_path / "evaluation" / "results" / "2026-10-01T153012.json"
+    assert json.loads(path.read_text()) == record
+    assert (tmp_path / "evaluation" / "labels.jsonl").read_text() == '{"id": "x"}\n'

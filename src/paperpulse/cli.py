@@ -19,7 +19,6 @@ import json
 import logging
 import os
 import sys
-from dataclasses import asdict
 from datetime import date
 from pathlib import Path
 
@@ -27,7 +26,14 @@ from dotenv import find_dotenv, load_dotenv
 
 from paperpulse.config import Config, load_config
 from paperpulse.embeddings import SentenceTransformerEmbedder
-from paperpulse.evaluation import eligible_papers, evaluate, format_report, labelling_pool
+from paperpulse.evaluation import (
+    eligible_papers,
+    evaluate,
+    evaluation_record,
+    format_report,
+    labelling_pool,
+    save_evaluation,
+)
 from paperpulse.labelling import (
     export_labels,
     import_labels,
@@ -151,10 +157,17 @@ def _labels_and_eval(args: argparse.Namespace, store: Store, config: Config) -> 
             llms.append(_llm(model_config))
     k = args.k or config.selection.top
     results = evaluate(store, config, embedder, llms=llms, k=k, cached_only=args.cached_only)
+    labels_jsonl = "".join(line + "\n" for line in export_labels(store))
+    record = evaluation_record(results, config, llms, labels_jsonl, k, args.cached_only)
     if args.json:
-        print(json.dumps([asdict(r) for r in results], indent=2, default=str))
+        print(json.dumps(record, indent=2, ensure_ascii=False))
     else:
         print(format_report(results, k=k, n=config.llm.candidates))
+    if not args.no_save and results[0].windows:
+        path = save_evaluation(record, labels_jsonl, args.save_dir)
+        logger.info("Result saved to %s, label set to %s", path, args.save_dir / "labels.jsonl")
+        if not record["complete"]:
+            logger.warning("Saved as incomplete: %s", "; ".join(record["incomplete_reasons"]))
     return 0
 
 
@@ -239,7 +252,18 @@ def _parser() -> argparse.ArgumentParser:
         help="compare these LLMs, one hybrid+<model> row each (default: llm.model)",
     )
     evaluate_cmd.add_argument("--no-llm", action="store_true", help="skip the LLM variants")
-    evaluate_cmd.add_argument("--json", action="store_true", help="per-window results as JSON")
+    evaluate_cmd.add_argument(
+        "--json", action="store_true", help="print the full result record as JSON"
+    )
+    evaluate_cmd.add_argument(
+        "--no-save", action="store_true", help="don't write the result and label set to disk"
+    )
+    evaluate_cmd.add_argument(
+        "--save-dir",
+        type=Path,
+        default=Path("evaluation"),
+        help="where results/<timestamp>.json and labels.jsonl go (default: ./evaluation)",
+    )
 
     labels = commands.add_parser("labels", help="export or import labels as JSONL")
     labels.add_argument("action", choices=["export", "import"])

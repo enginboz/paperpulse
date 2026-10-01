@@ -74,6 +74,7 @@ paperpulse label                    # rate a pool of papers interactively (y/n/s
 paperpulse eval                     # compare ranking variants against your labels
 paperpulse eval --models mistral llama3.2   # compare LLMs on the same labels
 paperpulse eval --no-llm            # retrieval variants only, in seconds
+paperpulse eval --no-save           # quick check without writing a result file
 paperpulse labels export labels.jsonl
 paperpulse labels import labels.jsonl   # re-fetches missing papers from PubMed
 ```
@@ -100,7 +101,9 @@ hybrid+mistral       83%    89%     100%
 hybrid+llama3.2      50%    89%     100%
 ```
 
-LLM variants assess any shortlisted paper missing from the cache, so the first run per model takes a few minutes per labelled week and later runs reuse the cache; `--cached-only` skips the LLM and reports how complete the cached rows are. Labels export to JSONL, so an evaluation set can be versioned alongside the config and rebuilt on another machine.
+LLM variants assess any shortlisted paper missing from the cache, so the first run per model takes a few minutes per labelled week and later runs reuse the cache; `--cached-only` skips the LLM and reports how complete the cached rows are.
+
+Every run is saved to [`evaluation/`](evaluation/) as `results/<timestamp>.json`, together with the label set it used as `labels.jsonl`. A result file records the setup, a checksum of the labels, the scores per week and the papers each variant picked, and is marked incomplete when part of the comparison is missing. Anyone can import the label set and re-run the evaluation.
 
 ## Output
 
@@ -175,7 +178,7 @@ src/paperpulse/
 │   └── assess.py         # per-paper LLM rubric with structured output
 ├── pipeline.py           # ingest(), select() and the shared rank_papers()
 ├── labelling.py          # feedback, interactive pool labelling, JSONL export/import
-├── evaluation.py         # pooling and P@k / R@n per ranking variant
+├── evaluation.py         # pooling, P@k / R@n per variant, saved result records
 └── cli.py
 ```
 
