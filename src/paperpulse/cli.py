@@ -156,7 +156,15 @@ def _labels_and_eval(args: argparse.Namespace, store: Store, config: Config) -> 
             model_config.llm.model = model
             llms.append(_llm(model_config))
     k = args.k or config.selection.top
-    results = evaluate(store, config, embedder, llms=llms, k=k, cached_only=args.cached_only)
+    results = evaluate(
+        store,
+        config,
+        embedder,
+        llms=llms,
+        k=k,
+        cached_only=args.cached_only,
+        end=args.end or date.today(),
+    )
     labels_jsonl = "".join(line + "\n" for line in export_labels(store))
     record = evaluation_record(results, config, llms, labels_jsonl, k, args.cached_only)
     if args.json:
@@ -254,6 +262,11 @@ def _parser() -> argparse.ArgumentParser:
     evaluate_cmd.add_argument("--no-llm", action="store_true", help="skip the LLM variants")
     evaluate_cmd.add_argument(
         "--json", action="store_true", help="print the full result record as JSON"
+    )
+    evaluate_cmd.add_argument(
+        "--end",
+        type=date.fromisoformat,
+        help="last day of the newest window (default: today; use your labelling weekday)",
     )
     evaluate_cmd.add_argument(
         "--no-save", action="store_true", help="don't write the result and label set to disk"

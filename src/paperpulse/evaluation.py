@@ -118,12 +118,19 @@ class VariantResult:
         return mean(values) if values else None
 
 
-def evaluation_windows(labels: list[tuple[Label, Paper]], days: int) -> list[tuple[date, date]]:
-    """Consecutive, non-overlapping windows of `days` covering every labelled paper, newest last."""
+def evaluation_windows(
+    labels: list[tuple[Label, Paper]], days: int, end: date | None = None
+) -> list[tuple[date, date]]:
+    """
+    Consecutive, non-overlapping windows of `days` covering every labelled
+    paper, newest last. They tile back from `end` (default: the newest
+    labelled paper). Passing the labelling day keeps them aligned with the
+    windows `paperpulse label` pooled from, so no window splits a pool.
+    """
     if not labels:
         return []
     first = min(p.added for _, p in labels)
-    end = max(p.added for _, p in labels)
+    end = end or max(p.added for _, p in labels)
     windows = []
     while end >= first:
         start = window_start(end, days)
@@ -139,6 +146,7 @@ def evaluate(
     llms: list[LLM] = (),
     k: int | None = None,
     cached_only: bool = False,
+    end: date | None = None,
 ) -> list[VariantResult]:
     k = k or config.selection.top
     n = config.llm.candidates
@@ -151,7 +159,8 @@ def evaluate(
         variants.append((f"hybrid+{llm.name}", _variant_config(config, hybrid=True), llm))
     results = [VariantResult(name) for name, _, _ in variants]
 
-    for start, end in evaluation_windows(store.labelled_papers(), config.selection.window_days):
+    windows = evaluation_windows(store.labelled_papers(), config.selection.window_days, end)
+    for start, end in windows:
         papers = eligible_papers(store, config, start, end)
         relevant = {p.id for p in papers if p.id in labels and labels[p.id].relevant}
         if not any(p.id in labels for p in papers):

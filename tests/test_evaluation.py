@@ -196,3 +196,12 @@ def test_save_writes_timestamped_result_and_label_set(tmp_path):
     assert path == tmp_path / "evaluation" / "results" / "2026-10-01T153012.json"
     assert json.loads(path.read_text()) == record
     assert (tmp_path / "evaluation" / "labels.jsonl").read_text() == '{"id": "x"}\n'
+
+
+def test_windows_can_be_anchored_to_the_labelling_day():
+    papers = [make_paper(n, added=d) for n, d in [(1, date(2026, 9, 25)), (2, date(2026, 10, 1))]]
+    windows = evaluation_windows([(None, p) for p in papers], days=7, end=date(2026, 10, 2))
+    assert windows == [
+        (date(2026, 9, 19), date(2026, 9, 25)),
+        (date(2026, 9, 26), date(2026, 10, 2)),
+    ]
