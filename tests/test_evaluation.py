@@ -164,6 +164,7 @@ def test_record_documents_setup_labels_and_picks(store, config, embedder):
     window = record["windows"][0]
     assert window["variants"]["dense"]["top"] == ["pmid:1"]
     assert window["variants"]["hybrid+fake-llm"]["top"] == ["pmid:2"]
+    assert set(window["variants"]["hybrid+fake-llm"]["shortlist"]) == {"pmid:1", "pmid:2", "pmid:3"}
     json.dumps(record)  # must be serialisable as is
 
 

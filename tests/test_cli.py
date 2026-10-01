@@ -55,3 +55,29 @@ def test_shell_variables_win_over_dotenv(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text("PUBMED_EMAIL=file@example.org\n")
     cli.main(["schema"])
     assert os.environ["PUBMED_EMAIL"] == "shell@example.org"
+
+
+def test_history_lists_and_shows_saved_digests(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(cli, "SentenceTransformerEmbedder", lambda _: FakeEmbedder())
+    config = tmp_path / "paperpulse.toml"
+    config.write_text('[profile]\ntopics = ["fhir"]\n[llm]\nenabled = false\n')
+    db = tmp_path / "pp.db"
+    base = ["-c", str(config), "--db", str(db)]
+
+    assert cli.main([*base, "history"]) == 0
+    assert "No saved digests yet" in capsys.readouterr().out
+
+    store = Store(db)
+    store.upsert_papers([make_paper(1, abstract="fhir", added=date.today())])
+    store.close()
+    cli.main([*base, "select"])
+    run_id = json.loads(capsys.readouterr().out)["run"]["id"]
+
+    assert cli.main([*base, "history"]) == 0
+    listing = capsys.readouterr().out
+    assert run_id[:8] in listing and "1. Paper 1" in listing
+
+    for selector in (date.today().isoformat(), run_id[:6]):
+        assert cli.main([*base, "history", selector]) == 0
+        assert json.loads(capsys.readouterr().out)["run"]["id"] == run_id
+    assert cli.main([*base, "history", "1999-01-01"]) == 1

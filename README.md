@@ -58,6 +58,8 @@ paperpulse select                 # rank and print the digest
 paperpulse select --top 5 -o digest.json
 paperpulse select --no-record     # preview without marking papers as shown
 paperpulse select --no-llm        # skip the LLM stage, rank by similarity only
+paperpulse history                # list saved digests
+paperpulse history 2026-10-02     # show one again (a date or a run id)
 paperpulse schema                 # JSON schema of the output
 ```
 
@@ -106,6 +108,8 @@ LLM variants assess any shortlisted paper missing from the cache, so the first r
 Every run is saved to [`evaluation/`](evaluation/) as `results/<timestamp>.json`, together with the label set it used as `labels.jsonl`. A result file records the setup, a checksum of the labels, the scores per week and the papers each variant picked, and is marked incomplete when part of the comparison is missing. Anyone can import the label set and re-run the evaluation.
 
 ## Output
+
+Besides the selected `papers`, every digest carries its `shortlist`: all papers the LLM assessed, in retrieval order, with their assessment and whether they were selected. It shows why a paper did *not* make the cut, for example an opinion piece rated 2 or a solid paper rated 4 that lost a close race. The example below shows one selected paper and omits the shortlist for brevity.
 
 ```json
 {

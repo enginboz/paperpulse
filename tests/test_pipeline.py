@@ -163,3 +163,25 @@ def test_keyword_match_lifts_a_paper_embeddings_miss(store, config, embedder):
     lifted = hybrid.papers[0].score
     assert (lifted.dense_rank, lifted.keyword_rank, lifted.keyword_topic) == (2, 1, "HL7")
     assert hybrid.papers[1].score.keyword_rank is None
+
+
+def test_digest_keeps_the_assessed_shortlist_including_rejects(store, config, embedder):
+    seed(store)
+    config.selection.top = 1
+    llm = FakeLLM({"NLP on clinical notes": 5, "FHIR interoperability in hospitals": 4})
+    digest = select(store, config, embedder, llm=llm, now=NOW)
+
+    assert [p.pmid for p in digest.papers] == ["2"]
+    shortlist = {c.id: c for c in digest.shortlist}
+    assert [c.retrieval_rank for c in digest.shortlist] == [1, 2, 3]
+    assert shortlist["pmid:2"].selected and shortlist["pmid:2"].score.assessment.relevance == 5
+    # rated 4, good enough but beaten to the single slot
+    assert not shortlist["pmid:1"].selected and shortlist["pmid:1"].score.assessment.relevance == 4
+    # rated 1, below min_relevance, still documented with its rationale
+    assert shortlist["pmid:3"].score.assessment.relevance == 1
+    assert store.latest_run().shortlist == digest.shortlist
+
+
+def test_digest_without_llm_has_no_shortlist(store, config, embedder):
+    seed(store)
+    assert select(store, config, embedder, now=NOW).shortlist == []

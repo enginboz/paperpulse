@@ -99,6 +99,18 @@ class RankedPaper(BaseModel):
     score: Score
 
 
+class Candidate(BaseModel):
+    """A paper the LLM assessed for this digest, whether or not it was selected."""
+
+    retrieval_rank: int = Field(description="Position after hybrid retrieval, before the LLM")
+    selected: bool = Field(description="Whether it made it into `papers`")
+    id: str
+    title: str
+    journal: str
+    url: str
+    score: Score
+
+
 class RunInfo(BaseModel):
     """Everything needed to understand or reproduce a selection."""
 
@@ -116,6 +128,11 @@ class Digest(BaseModel):
     schema_version: str = SCHEMA_VERSION
     run: RunInfo
     papers: list[RankedPaper]
+    shortlist: list[Candidate] = Field(
+        default_factory=list,
+        description="Every paper the LLM assessed, in retrieval order, including rejected "
+        "ones; empty when the LLM stage did not run",
+    )
 
 
 class Label(BaseModel):

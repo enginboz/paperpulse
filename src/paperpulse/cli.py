@@ -5,6 +5,7 @@ Command-line interface.
     paperpulse select            rank stored papers, print the digest as JSON
     paperpulse run               ingest, then select
     paperpulse schema            print the JSON schema of the digest
+    paperpulse history           list saved digests (history <date|run id> shows one)
     paperpulse feedback 2 up     label a paper from the latest digest
     paperpulse label             label a pool of papers for evaluation
     paperpulse eval              compare ranking variants against the labels
@@ -79,6 +80,8 @@ def main(argv: list[str] | None = None) -> int:
 
     store = Store(args.db)
     try:
+        if args.command == "history":
+            return _history(store, args.run)
         if args.command in ("feedback", "label", "eval", "labels"):
             return _labels_and_eval(args, store, config)
         if args.command in ("ingest", "run"):
@@ -102,6 +105,31 @@ def main(argv: list[str] | None = None) -> int:
 def _ingest(store: Store, config: Config, days: int | None) -> None:
     sources = [PubMedSource(config.sources.pubmed)]
     ingest(store, sources, default_days=days or config.selection.window_days, today=date.today())
+
+
+def _history(store: Store, run: str | None) -> int:
+    runs = store.all_runs()
+    if run is None:
+        if not runs:
+            print("No saved digests yet. `paperpulse run` creates one.")
+        for d in runs:
+            r = d.run
+            local = r.created_at.astimezone()
+            print(f"{local:%Y-%m-%d %H:%M}  {r.id[:8]}  {r.llm_model or 'no LLM'}")
+            for p in d.papers:
+                print(f"    {p.rank}. {p.title[:90]}")
+        return 0
+    # A date (local time, as listed) picks that day's latest digest; else a run id prefix.
+    matches = [
+        d
+        for d in runs
+        if d.run.created_at.astimezone().date().isoformat() == run or d.run.id.startswith(run)
+    ]
+    if not matches:
+        logger.error("No saved digest matches %r. `paperpulse history` lists them.", run)
+        return 1
+    print(matches[-1].model_dump_json(indent=2))
+    return 0
 
 
 def _labels_and_eval(args: argparse.Namespace, store: Store, config: Config) -> int:
@@ -234,6 +262,9 @@ def _parser() -> argparse.ArgumentParser:
     commands.add_parser("select", parents=[select_args], help="rank papers, output JSON")
     commands.add_parser("run", parents=[ingest_args, select_args], help="ingest, then select")
     commands.add_parser("schema", help="print the digest JSON schema")
+
+    history = commands.add_parser("history", help="list saved digests or show one")
+    history.add_argument("run", nargs="?", help="a date (YYYY-MM-DD) or a run id prefix")
 
     feedback = commands.add_parser("feedback", help="label a paper as relevant or not")
     feedback.add_argument("target", help="rank in the latest digest, a DOI, or pmid:<id>")

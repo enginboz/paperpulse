@@ -16,7 +16,7 @@ from datetime import UTC, date, datetime, timedelta
 from paperpulse.config import Config
 from paperpulse.embeddings import Embedder, embed_papers
 from paperpulse.llm import LLM, LLMUnavailable
-from paperpulse.models import Digest, Paper, RankedPaper, RunInfo, Score
+from paperpulse.models import Candidate, Digest, Paper, RankedPaper, RunInfo, Score
 from paperpulse.ranking.assess import assess_papers
 from paperpulse.ranking.dense import best_topic_matches
 from paperpulse.ranking.filters import apply_filters
@@ -72,14 +72,22 @@ def select(
 
     ranking = rank_papers(store, config, embedder, eligible, llm=llm)
     scored, llm_used = ranking.papers, ranking.llm_model
+    selected_ids = {p.id for p, _ in scored[: sel.top]}
+    shortlist = [
+        Candidate(
+            retrieval_rank=rank,
+            selected=p.id in selected_ids,
+            **p.model_dump(include={"id", "title", "journal", "url"}),
+            score=_rounded(s),
+        )
+        for rank, (p, s) in enumerate(ranking.shortlist, 1)
+    ]
 
     ranked = [
         RankedPaper(
             rank=rank,
             **p.model_dump(include=RANKED_FIELDS),
-            score=s.model_copy(
-                update={f: round(getattr(s, f), 4) for f in ("total", "fusion", "dense")}
-            ),
+            score=_rounded(s),
         )
         for rank, (p, s) in enumerate(scored[: sel.top], 1)
     ]
@@ -96,6 +104,7 @@ def select(
             after_filters=len(eligible),
         ),
         papers=ranked,
+        shortlist=shortlist,
     )
     if record and ranked:
         store.save_run(digest)
@@ -106,8 +115,12 @@ def select(
 class Ranking:
     papers: list[tuple[Paper, Score]]
     llm_model: str | None
-    shortlist: list[str] = field(default_factory=list)
-    """Paper ids that reached the LLM stage, in retrieval order."""
+    shortlist: list[tuple[Paper, Score]] = field(default_factory=list)
+    """Papers that reached the LLM stage, in retrieval order, with their assessments."""
+
+    @property
+    def shortlist_ids(self) -> list[str]:
+        return [p.id for p, _ in self.shortlist]
 
 
 def rank_papers(
@@ -142,10 +155,13 @@ def rank_papers(
         logger.warning("%s; ranking by retrieval scores only", e)
         return Ranking(scored, None)
 
+    assessed = [
+        (p, s.model_copy(update={"assessment": assessments.get(p.id)})) for p, s in shortlist
+    ]
     kept = [
-        (p, s.model_copy(update={"total": a.relevance + s.fusion, "assessment": a}))
-        for p, s in shortlist
-        if (a := assessments.get(p.id)) and a.relevance >= config.llm.min_relevance
+        (p, s.model_copy(update={"total": s.assessment.relevance + s.fusion}))
+        for p, s in assessed
+        if s.assessment and s.assessment.relevance >= config.llm.min_relevance
     ]
     logger.info(
         "%d of %d shortlisted papers rated relevance >= %d",
@@ -154,7 +170,13 @@ def rank_papers(
         config.llm.min_relevance,
     )
     kept.sort(key=lambda ps: ps[1].total, reverse=True)
-    return Ranking(kept, llm.name, [p.id for p, _ in shortlist])
+    return Ranking(kept, llm.name, assessed)
+
+
+def _rounded(score: Score) -> Score:
+    return score.model_copy(
+        update={f: round(getattr(score, f), 4) for f in ("total", "fusion", "dense")}
+    )
 
 
 def _retrieve(

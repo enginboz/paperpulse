@@ -315,6 +315,11 @@ class Store:
         )
         return {r["paper_id"] for r in rows}
 
+    def all_runs(self) -> list[Digest]:
+        """Every saved digest, oldest first."""
+        rows = self.db.execute("SELECT digest FROM runs ORDER BY created_at")
+        return [Digest.model_validate_json(r["digest"]) for r in rows]
+
     def latest_run(self) -> Digest | None:
         row = self.db.execute("SELECT digest FROM runs ORDER BY created_at DESC LIMIT 1").fetchone()
         return Digest.model_validate_json(row["digest"]) if row else None

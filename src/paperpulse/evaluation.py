@@ -104,6 +104,8 @@ class WindowScore:
     assessed: float | None = None
     top: list[str] = field(default_factory=list)
     """Ids of the papers this variant would show, so a result can be checked paper by paper."""
+    shortlist: list[str] = field(default_factory=list)
+    """Ids of its top n, the LLM shortlist; recall is computed over these."""
 
 
 @dataclass
@@ -180,11 +182,11 @@ def evaluate(
                 result.unavailable = True
                 continue
             top = [p.id for p, _ in ranking.papers[:k]]
-            reached = ranking.shortlist or [p.id for p, _ in ranking.papers[:n]]
+            reached = ranking.shortlist_ids or [p.id for p, _ in ranking.papers[:n]]
             assessed = None
             if variant_llm is not None and ranking.shortlist:
                 key = cache_key(variant_llm, config.profile)
-                cached = store.get_assessments(ranking.shortlist, key)
+                cached = store.get_assessments(ranking.shortlist_ids, key)
                 assessed = len(cached) / len(ranking.shortlist)
             result.windows.append(
                 WindowScore(
@@ -199,6 +201,7 @@ def evaluate(
                     returned=len(top),
                     assessed=assessed,
                     top=top,
+                    shortlist=reached,
                 )
             )
     return results
