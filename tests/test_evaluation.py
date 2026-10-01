@@ -64,13 +64,13 @@ def test_llm_variant_uses_only_cached_assessments_unless_asked(store, config, em
     label(store, "pmid:2", True)
     llm = FakeLLM({"Interface engines": 5})
 
-    *_, cached_only = evaluate(store, config, embedder, llm=llm, k=1)
-    assert cached_only.name == "hybrid+llm"
+    *_, cached_only = evaluate(store, config, embedder, llms=[llm], k=1)
+    assert cached_only.name == "hybrid+fake-llm"
     assert cached_only.mean("assessed") == 0.0
     assert cached_only.mean("precision") is None  # nothing assessed, nothing returned
     assert llm.calls == []
 
-    *_, assessed = evaluate(store, config, embedder, llm=llm, k=1, assess_missing=True)
+    *_, assessed = evaluate(store, config, embedder, llms=[llm], k=1, assess_missing=True)
     assert assessed.mean("assessed") == 1.0
     assert assessed.mean("precision") == 1.0
 
@@ -103,3 +103,17 @@ def test_report_flags_low_label_coverage(store, config, embedder):
 def test_report_without_labels_explains_how_to_start(store, config, embedder):
     report = format_report(evaluate(store, config, embedder), k=3, n=12)
     assert report.startswith("No labelled papers yet.")
+
+
+def test_models_are_compared_side_by_side_on_the_same_labels(store, config, embedder):
+    seed_hl7_week(store, config)
+    label(store, "pmid:1", False)
+    label(store, "pmid:2", True)
+    good = FakeLLM({"Interface engines": 5})
+    good.name = "good"
+    bad = FakeLLM({"HL": 5})
+    bad.name = "bad"
+
+    results = evaluate(store, config, embedder, llms=[good, bad], k=1, assess_missing=True)
+    by_name = {r.name: r.mean("precision") for r in results}
+    assert by_name == {"dense": 0.0, "hybrid": 1.0, "hybrid+good": 1.0, "hybrid+bad": 0.0}

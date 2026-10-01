@@ -12,7 +12,7 @@ from paperpulse.labelling import (
 from paperpulse.models import Label
 from paperpulse.pipeline import select
 from paperpulse.store import Store
-from tests.conftest import FakeEmbedder, make_paper
+from tests.conftest import FakeEmbedder, FakeLLM, make_paper
 
 NOW = datetime(2026, 9, 29, 6, tzinfo=UTC)
 
@@ -121,3 +121,39 @@ def test_cli_feedback_and_export(tmp_path, capsys, monkeypatch):
     assert cli.main([*base, "labels", "export"]) == 0
     exported = json.loads(capsys.readouterr().out)
     assert (exported["id"], exported["relevant"], exported["note"]) == ("pmid:1", True, "useful")
+
+
+def _cli_setup(tmp_path, monkeypatch, toml_extra=""):
+    monkeypatch.setattr(cli, "SentenceTransformerEmbedder", lambda _: FakeEmbedder())
+    config = tmp_path / "paperpulse.toml"
+    config.write_text(f'[profile]\ntopics = ["fhir"]\n{toml_extra}')
+    db = tmp_path / "pp.db"
+    s = Store(db)
+    s.upsert_papers([make_paper(n, abstract="fhir", added=date.today()) for n in range(1, 4)])
+    s.close()
+    return ["-c", str(config), "--db", str(db)]
+
+
+def test_cli_label_pool_goes_as_deep_as_the_llm_shortlist(tmp_path, monkeypatch, capsys):
+    base = _cli_setup(tmp_path, monkeypatch, "[llm]\ncandidates = 15\n")
+    monkeypatch.setattr("builtins.input", lambda _: "q")
+    assert cli.main([*base, "label"]) == 0
+    assert "from the top 15 of each ranking" in capsys.readouterr().out
+
+
+def test_cli_eval_compares_requested_models(tmp_path, monkeypatch, capsys):
+    base = _cli_setup(tmp_path, monkeypatch)
+
+    def fake_llm(config):
+        llm = FakeLLM({"Paper 1": 5})
+        llm.name = config.llm.model
+        return llm
+
+    monkeypatch.setattr(cli, "_llm", fake_llm)
+    s = Store(tmp_path / "pp.db")
+    s.set_label(Label(paper_id="pmid:1", relevant=True, source="pool", labelled_at=NOW))
+    s.close()
+
+    assert cli.main([*base, "eval", "--models", "mistral", "llama3.2", "--assess"]) == 0
+    report = capsys.readouterr().out
+    assert "hybrid+mistral" in report and "hybrid+llama3.2" in report

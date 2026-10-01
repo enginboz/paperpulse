@@ -39,10 +39,12 @@ def record_feedback(
 def label_interactively(
     store: Store,
     papers: list[Paper],
-    ask: Callable[[str], str] = input,
-    show: Callable[[str], None] = print,
+    ask: Callable[[str], str] | None = None,
+    show: Callable[[str], None] | None = None,
 ) -> int:
     """Ask about each paper until the pool is done or the user quits. Returns labels written."""
+    # Resolved at call time, not as defaults, so input() can be replaced in tests.
+    ask, show = ask or input, show or print
     written = 0
     for i, paper in enumerate(papers, 1):
         show(_describe(paper, i, len(papers)))

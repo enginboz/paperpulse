@@ -73,13 +73,14 @@ paperpulse feedback 3 down --note "opinion piece"
 paperpulse label                    # rate a pool of papers interactively (y/n/skip/quit)
 paperpulse eval                     # compare ranking variants against your labels
 paperpulse eval --assess            # also run the LLM on unassessed shortlist papers
+paperpulse eval --models mistral llama3.2 --assess   # compare LLMs on the same labels
 paperpulse labels export labels.jsonl
 paperpulse labels import labels.jsonl   # re-fetches missing papers from PubMed
 ```
 
-Rating only what a digest showed would make the current ranking look perfect by construction, because nothing it missed ever gets judged. `paperpulse label` therefore asks about a **pool**: the union of the top papers of the dense, keyword and hybrid rankings, interleaved so that quitting early still covers the head of each (the pooling method used in TREC evaluations).
+Rating only what a digest showed would make the current ranking look perfect by construction, because nothing it missed ever gets judged. `paperpulse label` therefore asks about a **pool**: the union of the top papers of the dense, keyword and hybrid rankings, interleaved so that quitting early still covers the head of each (the pooling method used in TREC evaluations). The pool goes as deep as the LLM shortlist, so any paper an LLM could promote has a label instead of silently counting as not relevant.
 
-`paperpulse eval` re-ranks every labelled time window with each variant, using exactly the code path of `select`, and reports:
+`paperpulse eval` re-ranks every labelled time window with each variant (dense, hybrid, and hybrid plus each LLM given with `--models`), using exactly the code path of `select`. Labels belong to papers, not to variants, so one label set serves every comparison. It reports:
 
 | Metric | Meaning |
 |---|---|
@@ -92,10 +93,11 @@ Example of the report format (made-up numbers, not a measured result):
 ```
 2 window(s), 9 relevant labelled papers
 
-variant         P@3   R@12  judged
-dense           33%    67%     100%
-hybrid          50%    89%     100%
-hybrid+llm      83%    89%     100%
+variant              P@3   R@12  judged
+dense                33%    67%     100%
+hybrid               50%    89%     100%
+hybrid+mistral       83%    89%     100%
+hybrid+llama3.2      50%    89%     100%
 ```
 
 The LLM variant uses cached assessments by default, so evaluation is instant; `--assess` fills gaps. Labels export to JSONL, so an evaluation set can be versioned alongside the config and rebuilt on another machine.

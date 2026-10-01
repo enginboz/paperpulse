@@ -132,19 +132,25 @@ def _labels_and_eval(args: argparse.Namespace, store: Store, config: Config) -> 
         end = args.end or date.today()
         start = window_start(end, config.selection.window_days)
         papers = eligible_papers(store, config, start, end)
-        pool = labelling_pool(store, config, embedder, papers, depth=args.depth)
+        depth = args.depth or config.llm.candidates
+        pool = labelling_pool(store, config, embedder, papers, depth=depth)
         if not pool:
             logger.warning("Nothing to label between %s and %s.", start, end)
             return 0
-        print(f"{len(pool)} unlabelled papers from the top {args.depth} of each ranking, ", end="")
+        print(f"{len(pool)} unlabelled papers from the top {depth} of each ranking, ", end="")
         print(f"{start} to {end}.")
         written = label_interactively(store, pool)
         print(f"\n{written} labels saved.")
         return 0
 
-    llm = None if args.no_llm or not config.llm.enabled else _llm(config)
+    llms = []
+    if not args.no_llm and config.llm.enabled:
+        for model in args.models or [config.llm.resolved_model]:
+            model_config = config.model_copy(deep=True)
+            model_config.llm.model = model
+            llms.append(_llm(model_config))
     k = args.k or config.selection.top
-    results = evaluate(store, config, embedder, llm=llm, k=k, assess_missing=args.assess)
+    results = evaluate(store, config, embedder, llms=llms, k=k, assess_missing=args.assess)
     if args.json:
         print(json.dumps([asdict(r) for r in results], indent=2, default=str))
     else:
@@ -214,7 +220,7 @@ def _parser() -> argparse.ArgumentParser:
     feedback.add_argument("--note", help="optional free-text reason")
 
     label = commands.add_parser("label", help="interactively label a pool of papers")
-    label.add_argument("--depth", type=int, default=10, help="top N of each ranking (default: 10)")
+    label.add_argument("--depth", type=int, help="top N of each ranking (default: llm.candidates)")
     label.add_argument(
         "--end", type=date.fromisoformat, help="last day of the window (default: today)"
     )
@@ -224,7 +230,13 @@ def _parser() -> argparse.ArgumentParser:
     evaluate_cmd.add_argument(
         "--assess", action="store_true", help="run the LLM on uncached shortlist papers (slow)"
     )
-    evaluate_cmd.add_argument("--no-llm", action="store_true", help="skip the hybrid+llm variant")
+    evaluate_cmd.add_argument(
+        "--models",
+        nargs="+",
+        metavar="MODEL",
+        help="compare these LLMs, one hybrid+<model> row each (default: llm.model)",
+    )
+    evaluate_cmd.add_argument("--no-llm", action="store_true", help="skip the LLM variants")
     evaluate_cmd.add_argument("--json", action="store_true", help="per-window results as JSON")
 
     labels = commands.add_parser("labels", help="export or import labels as JSONL")

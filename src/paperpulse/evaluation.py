@@ -6,12 +6,15 @@ which asks about a *pool* of papers. The pool is the union of the top papers
 of every ranking variant (as in TREC pooling), so each variant gets the chance
 to show what it finds that the others miss. Judging only the papers a digest
 already showed would make the current ranking look perfect by construction.
+The pool goes as deep as the LLM shortlist, so every paper an LLM could
+promote has a label; otherwise unjudged promotions would count against it.
 
 For each time window, every variant ranks the same eligible papers:
 
-    dense        embedding similarity only
-    hybrid       dense + BM25 fused with reciprocal rank fusion
-    hybrid+llm   hybrid, then the LLM assesses the shortlist
+    dense          embedding similarity only
+    hybrid         dense + BM25 fused with reciprocal rank fusion
+    hybrid+<llm>   hybrid, then that LLM assesses the shortlist (one row per
+                   model, so models are compared on the same labels)
 
 and is scored on
 
@@ -125,7 +128,7 @@ def evaluate(
     store: Store,
     config: Config,
     embedder: Embedder,
-    llm: LLM | None = None,
+    llms: list[LLM] = (),
     k: int | None = None,
     assess_missing: bool = False,
 ) -> list[VariantResult]:
@@ -136,8 +139,8 @@ def evaluate(
         ("dense", _variant_config(config, hybrid=False), None),
         ("hybrid", _variant_config(config, hybrid=True), None),
     ]
-    if llm is not None:
-        variants.append(("hybrid+llm", _variant_config(config, hybrid=True), llm))
+    for llm in llms:
+        variants.append((f"hybrid+{llm.name}", _variant_config(config, hybrid=True), llm))
     results = [VariantResult(name) for name, _, _ in variants]
 
     for start, end in evaluation_windows(store.labelled_papers(), config.selection.window_days):
@@ -188,14 +191,15 @@ def format_report(results: list[VariantResult], k: int, n: int) -> str:
             "No labelled papers yet. Rate digest picks with `paperpulse feedback <rank> up|down`, "
             "or label a pool with `paperpulse label`."
         )
+    width = max(len(r.name) for r in results) + 2
     lines = [
         f"{len(windows)} window(s), {sum(w.relevant for w in windows)} relevant labelled papers",
         "",
-        f"{'variant':<12} {'P@' + str(k):>6} {'R@' + str(n):>6} {'judged':>7}",
+        f"{'variant':<{width}} {'P@' + str(k):>6} {'R@' + str(n):>6} {'judged':>7}",
     ]
     for r in results:
         lines.append(
-            f"{r.name:<12} {pct(r.mean('precision')):>6} {pct(r.mean('recall')):>6} "
+            f"{r.name:<{width}} {pct(r.mean('precision')):>6} {pct(r.mean('recall')):>6} "
             f"{pct(r.mean('judged')):>7}"
         )
     llm_rows = [r for r in results if r.mean("assessed") is not None]
