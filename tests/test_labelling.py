@@ -154,6 +154,6 @@ def test_cli_eval_compares_requested_models(tmp_path, monkeypatch, capsys):
     s.set_label(Label(paper_id="pmid:1", relevant=True, source="pool", labelled_at=NOW))
     s.close()
 
-    assert cli.main([*base, "eval", "--models", "mistral", "llama3.2", "--assess"]) == 0
+    assert cli.main([*base, "eval", "--models", "mistral", "llama3.2"]) == 0
     report = capsys.readouterr().out
     assert "hybrid+mistral" in report and "hybrid+llama3.2" in report

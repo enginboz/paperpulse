@@ -104,6 +104,8 @@ class WindowScore:
 class VariantResult:
     name: str
     windows: list[WindowScore] = field(default_factory=list)
+    unavailable: bool = False
+    """The LLM could not be reached, so this variant was not measured."""
 
     def mean(self, attr: str) -> float | None:
         values = [v for w in self.windows if (v := getattr(w, attr)) is not None]
@@ -130,7 +132,7 @@ def evaluate(
     embedder: Embedder,
     llms: list[LLM] = (),
     k: int | None = None,
-    assess_missing: bool = False,
+    cached_only: bool = False,
 ) -> list[VariantResult]:
     k = k or config.selection.top
     n = config.llm.candidates
@@ -155,8 +157,13 @@ def evaluate(
                 embedder,
                 papers,
                 llm=variant_llm,
-                cached_assessments_only=not assess_missing,
+                cached_assessments_only=cached_only,
             )
+            if variant_llm is not None and ranking.llm_model is None:
+                # rank_papers fell back to retrieval only; scoring that would
+                # silently report hybrid's numbers under the LLM's name.
+                result.unavailable = True
+                continue
             top = [p.id for p, _ in ranking.papers[:k]]
             reached = ranking.shortlist or [p.id for p, _ in ranking.papers[:n]]
             assessed = None
@@ -198,6 +205,9 @@ def format_report(results: list[VariantResult], k: int, n: int) -> str:
         f"{'variant':<{width}} {'P@' + str(k):>6} {'R@' + str(n):>6} {'judged':>7}",
     ]
     for r in results:
+        if r.unavailable:
+            lines.append(f"{r.name:<{width}} not measured: LLM unavailable (see log)")
+            continue
         lines.append(
             f"{r.name:<{width}} {pct(r.mean('precision')):>6} {pct(r.mean('recall')):>6} "
             f"{pct(r.mean('judged')):>7}"
@@ -207,7 +217,7 @@ def format_report(results: list[VariantResult], k: int, n: int) -> str:
         if (cov := r.mean("assessed")) < 1:
             lines.append(
                 f"\nNote: only {cov:.0%} of the {r.name} shortlist has cached assessments; "
-                "unassessed papers are left out. Run with --assess to fill the cache."
+                "unassessed papers are left out. Run without --cached-only to fill the cache."
             )
     if windows and (judged := results[0].mean("judged")) is not None and judged < 0.8:
         lines.append(

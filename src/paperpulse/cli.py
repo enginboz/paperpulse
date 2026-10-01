@@ -150,7 +150,7 @@ def _labels_and_eval(args: argparse.Namespace, store: Store, config: Config) -> 
             model_config.llm.model = model
             llms.append(_llm(model_config))
     k = args.k or config.selection.top
-    results = evaluate(store, config, embedder, llms=llms, k=k, assess_missing=args.assess)
+    results = evaluate(store, config, embedder, llms=llms, k=k, cached_only=args.cached_only)
     if args.json:
         print(json.dumps([asdict(r) for r in results], indent=2, default=str))
     else:
@@ -228,7 +228,9 @@ def _parser() -> argparse.ArgumentParser:
     evaluate_cmd = commands.add_parser("eval", help="compare ranking variants against labels")
     evaluate_cmd.add_argument("-k", type=int, help="precision cut-off (default: selection.top)")
     evaluate_cmd.add_argument(
-        "--assess", action="store_true", help="run the LLM on uncached shortlist papers (slow)"
+        "--cached-only",
+        action="store_true",
+        help="use only cached LLM assessments: fast, but LLM rows may be incomplete",
     )
     evaluate_cmd.add_argument(
         "--models",

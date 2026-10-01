@@ -72,8 +72,8 @@ paperpulse feedback 1 up            # rate a digest pick (rank, DOI or pmid:<id>
 paperpulse feedback 3 down --note "opinion piece"
 paperpulse label                    # rate a pool of papers interactively (y/n/skip/quit)
 paperpulse eval                     # compare ranking variants against your labels
-paperpulse eval --assess            # also run the LLM on unassessed shortlist papers
-paperpulse eval --models mistral llama3.2 --assess   # compare LLMs on the same labels
+paperpulse eval --models mistral llama3.2   # compare LLMs on the same labels
+paperpulse eval --no-llm            # retrieval variants only, in seconds
 paperpulse labels export labels.jsonl
 paperpulse labels import labels.jsonl   # re-fetches missing papers from PubMed
 ```
@@ -100,7 +100,7 @@ hybrid+mistral       83%    89%     100%
 hybrid+llama3.2      50%    89%     100%
 ```
 
-The LLM variant uses cached assessments by default, so evaluation is instant; `--assess` fills gaps. Labels export to JSONL, so an evaluation set can be versioned alongside the config and rebuilt on another machine.
+LLM variants assess any shortlisted paper missing from the cache, so the first run per model takes a few minutes per labelled week and later runs reuse the cache; `--cached-only` skips the LLM and reports how complete the cached rows are. Labels export to JSONL, so an evaluation set can be versioned alongside the config and rebuilt on another machine.
 
 ## Output
 
