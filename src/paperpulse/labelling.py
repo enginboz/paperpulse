@@ -8,9 +8,8 @@ from collections.abc import Callable, Iterable, Iterator
 from datetime import UTC, datetime
 
 from paperpulse.models import Label, Paper
+from paperpulse.ranking.assess import MAX_ABSTRACT_CHARS
 from paperpulse.store import Store
-
-ABSTRACT_PREVIEW = 700
 
 
 def resolve_paper(store: Store, target: str) -> Paper | None:
@@ -75,8 +74,9 @@ def _describe(paper: Paper, i: int, total: int) -> str:
         )
     )
     abstract = paper.abstract
-    if len(abstract) > ABSTRACT_PREVIEW:
-        abstract = abstract[:ABSTRACT_PREVIEW].rsplit(" ", 1)[0] + " …"
+    # Show exactly as much as the LLM gets, so human and model judge the same text.
+    if len(abstract) > MAX_ABSTRACT_CHARS:
+        abstract = abstract[:MAX_ABSTRACT_CHARS] + " …"
     link = f"https://doi.org/{paper.doi}" if paper.doi else paper.url
     return f"\n[{i}/{total}] {meta}\n{paper.title}\n{link}\n\n{abstract}\n"
 

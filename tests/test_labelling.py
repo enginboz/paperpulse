@@ -180,3 +180,17 @@ def test_cli_eval_without_labels_saves_nothing(tmp_path, monkeypatch):
     base = _cli_setup(tmp_path, monkeypatch, "[llm]\nenabled = false\n")
     assert cli.main([*base, "eval"]) == 0
     assert not (tmp_path / "evaluation").exists()
+
+
+def test_label_view_shows_as_much_abstract_as_the_llm_sees(store):
+    from paperpulse.ranking.assess import MAX_ABSTRACT_CHARS, build_user_prompt
+
+    long_paper = make_paper(1, abstract="word " * 1000)  # 5000 characters
+    store.upsert_papers([long_paper])
+    shown = []
+    label_interactively(store, [long_paper], ask=lambda _: "q", show=shown.append)
+
+    llm_abstract = build_user_prompt(long_paper).split("Abstract:\n", 1)[1]
+    assert len(llm_abstract) == MAX_ABSTRACT_CHARS
+    assert llm_abstract in shown[0]
+    assert shown[0].rstrip().endswith("…")
