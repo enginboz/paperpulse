@@ -24,11 +24,11 @@ select   time window ──▶ hard filters ──┬─▶ dense retrieval ─�
 - *Dense:* its highest cosine similarity to any one topic, using the biomedical embedding model [`S-PubMedBert-MS-MARCO`](https://huggingface.co/pritamdeka/S-PubMedBert-MS-MARCO). Taking the maximum instead of comparing against an averaged profile keeps niche interests from being drowned out by broad ones.
 - *Keyword:* its best BM25 score across topics, via SQLite FTS5 with stemming. Embeddings blur exact terms, and acronyms such as FHIR, HL7 or OMOP mean little to them. BM25 weighs rare terms heavily, so a paper that literally names one ranks high.
 
-The two rankings are merged with [reciprocal rank fusion](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf), which uses positions only, so similarity and BM25 scores never have to be put on one scale. On one week of real data, the keyword side pulled two papers into the LLM shortlist that embeddings had ranked 20th and 22nd (LLM-based pneumonia detection in radiology reports, and fact-checked medical question answering). The LLM rated both 5/5; one 5/5 paper that embeddings alone had kept (AI triage of vessel occlusion on CT) dropped out in exchange, so the shortlist gained one top-rated paper net. One week is a small sample, which is why an evaluation set is on the roadmap.
+The two rankings are merged with [reciprocal rank fusion](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf), which uses positions only, so similarity and BM25 scores never have to be put on one scale. On one week of real data, the keyword side pulled two papers into the LLM shortlist that embeddings had ranked 20th and 22nd (LLM-based pneumonia detection in radiology reports, and fact-checked medical question answering). The LLM rated both 5/5; one 5/5 paper that embeddings alone had kept (AI triage of vessel occlusion on CT) dropped out in exchange, so the shortlist gained one top-rated paper net. The [two-week evaluation](#results-so-far) does not yet show a consistent recall gain over dense retrieval alone.
 
 **An LLM judges each shortlisted paper on its own.** The best papers after fusion are assessed one at a time against a 1–5 rubric and your free-text preferences (for example, "original research over opinion pieces"). The model returns structured output: study type, a one-sentence rationale written before the score, and the relevance score. Judging papers individually, instead of asking for "the best 3 of these 20", keeps the task small enough for a local model, removes position bias, and makes every verdict cacheable and inspectable. Papers rated below a threshold are never shown, so a quiet week yields fewer picks rather than filler.
 
-In a comparison on real data, a 3B model (`llama3.2`) rated everything 5/5 and mislabelled opinion pieces as systematic reviews, while `mistral` (7B) separated them correctly. Hence `mistral` is the local default, with Claude as a much faster cloud option.
+In a comparison on real data, a 3B model (`llama3.2`) rated everything 5/5 and mislabelled opinion pieces as systematic reviews, while `mistral` (7B) separated them correctly. The [evaluation](#results-so-far) confirms it: `mistral` picked 6 of 6 relevant papers, `llama3.2` 4 of 6. Hence `mistral` is the local default, with Claude as a much faster cloud option.
 
 **Every pick explains itself.** The output records each paper's dense and keyword ranks, the topics behind them and the LLM assessment, plus run metadata (time window, models, candidate counts), so any selection can be understood and reproduced. Embeddings and assessments are cached, keyed by model, prompt version and profile, so re-runs only pay for what changed.
 
@@ -91,17 +91,22 @@ Rating only what a digest showed would make the current ranking look perfect by 
 | `R@n` | Share of all relevant papers that reach the top n, the LLM shortlist; the ceiling for the LLM stage |
 | `judged` | Share of the top k that carry a label; unlabelled papers count as not relevant, so low coverage means label more |
 
-Example of the report format (made-up numbers, not a measured result):
+### Results so far
+
+Two weeks of PubMed papers (19 Sep to 2 Oct 2026), 36 labelled papers of which 18 relevant, all variants fully measured. Source: [result file](evaluation/results/2026-10-02T135101.json), [label set](evaluation/labels.jsonl).
 
 ```
-2 window(s), 9 relevant labelled papers
-
 variant              P@3   R@12  judged
-dense                33%    67%     100%
-hybrid               50%    89%     100%
-hybrid+mistral       83%    89%     100%
-hybrid+llama3.2      50%    89%     100%
+dense                50%    60%    100%
+hybrid               67%    62%    100%
+hybrid+mistral      100%    62%    100%
+hybrid+llama3.2      67%    62%    100%
 ```
+
+- **The LLM stage does most of the work.** With `mistral`, all 6 papers shown across the two weeks were relevant, against 4 of 6 for hybrid retrieval alone and for `llama3.2`, and 3 of 6 for dense retrieval. This matches the earlier spot check in which `llama3.2` rated nearly everything highly.
+- **Hybrid versus dense is not settled.** Hybrid showed one more relevant paper, but recall was mixed: dense reached more relevant papers in the first week (7 of 10 against 5), hybrid in the second (6 of 8 against 4).
+- **Retrieval is the bottleneck.** About 4 in 10 relevant papers never reach the LLM shortlist, so no LLM can pick them. Widening the shortlist is the obvious next experiment.
+- **The sample is small.** Each precision figure rests on 6 picks, and the differences are one to three papers. These are first measurements, not significant results; labelling continues weekly and the numbers will be updated.
 
 LLM variants assess any shortlisted paper missing from the cache, so the first run per model takes a few minutes per labelled week and later runs reuse the cache; `--cached-only` skips the LLM and reports how complete the cached rows are.
 
@@ -194,7 +199,8 @@ v2 is a rewrite around three ideas: separate ingestion from selection so ranking
 
 ## Roadmap
 
-- **Next:** learn from feedback, e.g. use papers rated 👍 as extra positive examples in the profile, validated with `paperpulse eval`
+- **Next:** widen the LLM shortlist (12 to 20 papers) and measure whether recall rises without hurting precision; [retrieval is currently the bottleneck](#results-so-far)
+- Learn from feedback, e.g. use papers rated 👍 as extra positive examples in the profile, validated with `paperpulse eval`
 - Cross-encoder reranking between retrieval and the LLM stage
 - Diversity (MMR) so the top picks don't all come from one topic
 - Europe PMC source, including preprints
