@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from paperpulse.models import Assessment, Digest, Label, Paper
+from paperpulse.models import Assessment, Digest, Feedback, Label, Paper
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS papers (
@@ -59,6 +59,13 @@ CREATE TABLE IF NOT EXISTS labels (
     source      TEXT NOT NULL,
     note        TEXT,
     labelled_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS feedback (
+    paper_id      TEXT PRIMARY KEY REFERENCES papers(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    worth_reading INTEGER NOT NULL,
+    note          TEXT,
+    given_at      TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS ingest_state (
@@ -261,6 +268,24 @@ class Store:
                     label.labelled_at.isoformat(),
                 ),
             )
+
+    def set_feedback(self, feedback: Feedback) -> None:
+        """Feedback lives apart from labels and never changes the evaluation set."""
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO feedback (paper_id, worth_reading, note, given_at) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    feedback.paper_id,
+                    int(feedback.worth_reading),
+                    feedback.note,
+                    feedback.given_at.isoformat(),
+                ),
+            )
+
+    def get_feedback(self) -> dict[str, Feedback]:
+        rows = self.db.execute("SELECT * FROM feedback ORDER BY given_at")
+        return {r["paper_id"]: Feedback.model_validate(dict(r)) for r in rows}
 
     def get_labels(self) -> dict[str, Label]:
         rows = self.db.execute("SELECT * FROM labels ORDER BY labelled_at")

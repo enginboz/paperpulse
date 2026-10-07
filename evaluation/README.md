@@ -4,7 +4,7 @@ Measured results of PaperPulse's ranking variants against the author's own relev
 
 | File | Contents |
 |---|---|
-| `labels.jsonl` | The label set: one paper per line with DOI, PMID, title, the judgement (`relevant`) and how it was given (`pool`, `feedback`, `import`) |
+| `labels.jsonl` | The label set: one paper per line with DOI, PMID, title, the judgement (`relevant`, from title and abstract only) and how it was given (`pool` via `paperpulse label`, or `import`). Post-reading feedback is not part of this set |
 | `results/<timestamp>.json` | One file per `paperpulse eval` run |
 
 Each result file records:

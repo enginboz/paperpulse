@@ -136,12 +136,28 @@ class Digest(BaseModel):
 
 
 class Label(BaseModel):
-    """A human relevance judgement of one paper against the reader's interests."""
+    """
+    A relevance judgement from title and abstract, the same information the
+    ranking and the LLM see. This is the reference standard for `eval`.
+    """
 
     paper_id: str
     relevant: bool
-    source: Literal["feedback", "pool", "import"] = Field(
-        description="feedback: rated from a digest; pool: rated via `paperpulse label`"
+    source: Literal["pool", "import"] = Field(
+        description="pool: rated via `paperpulse label`; import: from an exported label set"
     )
     note: str | None = None
     labelled_at: datetime
+
+
+class Feedback(BaseModel):
+    """
+    A verdict after reading the paper itself. Kept apart from labels: it rests on
+    more information than any ranking stage had, so mixing it into the reference
+    standard would judge the system on something it could not know.
+    """
+
+    paper_id: str
+    worth_reading: bool
+    note: str | None = None
+    given_at: datetime

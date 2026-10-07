@@ -1,8 +1,11 @@
 """
 Offline evaluation of ranking variants against human relevance labels.
 
-Labels come from two places: feedback on digests, and `paperpulse label`,
-which asks about a *pool* of papers. The pool is the union of the top papers
+Labels are judgements from title and abstract, given via `paperpulse label`
+(or imported from an exported set). Feedback after reading a paper in full is
+kept separately and never used here.
+
+`paperpulse label` asks about a *pool* of papers: the union of the top papers
 of every ranking variant (as in TREC pooling), so each variant gets the chance
 to show what it finds that the others miss. Judging only the papers a digest
 already showed would make the current ranking look perfect by construction.
@@ -213,10 +216,7 @@ def format_report(results: list[VariantResult], k: int, n: int) -> str:
 
     windows = results[0].windows if results else []
     if not windows:
-        return (
-            "No labelled papers yet. Rate digest picks with `paperpulse feedback <rank> up|down`, "
-            "or label a pool with `paperpulse label`."
-        )
+        return "No labelled papers yet. Label a pool of papers with `paperpulse label`."
     width = max(len(r.name) for r in results) + 2
     lines = [
         f"{len(windows)} window(s), {sum(w.relevant for w in windows)} relevant labelled papers",

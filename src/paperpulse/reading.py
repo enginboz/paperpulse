@@ -4,14 +4,17 @@ A digest as a reading list for the terminal: what to read, why, and where.
 
 import textwrap
 
-from paperpulse.models import Candidate, Digest, RankedPaper
+from paperpulse.models import Candidate, Digest, Feedback, RankedPaper
 
 WIDTH = 88
 INDENT = "   "
 EXTRA_MIN_RELEVANCE = 4
 
 
-def format_reading_list(digest: Digest, extras: bool = True) -> str:
+def format_reading_list(
+    digest: Digest, extras: bool = True, feedback: dict[str, Feedback] | None = None
+) -> str:
+    feedback = feedback or {}
     run = digest.run
     created = run.created_at.astimezone()
     lines = [
@@ -24,7 +27,7 @@ def format_reading_list(digest: Digest, extras: bool = True) -> str:
 
     for paper in digest.papers:
         lines.append("")
-        lines.extend(_entry(f"{paper.rank}. ", paper))
+        lines.extend(_entry(f"{paper.rank}. ", paper, feedback.get(paper.id)))
 
     others = [
         c
@@ -37,13 +40,18 @@ def format_reading_list(digest: Digest, extras: bool = True) -> str:
         lines.append(f"\nAlso rated {EXTRA_MIN_RELEVANCE}+ by the LLM, but not in the top picks:")
         for c in others:
             lines.append("")
-            lines.extend(_entry("-  ", c, show_id=True))
+            lines.extend(_entry("-  ", c, feedback.get(c.id), show_id=True))
 
     lines.append("\nAfter reading: paperpulse feedback <rank or id> up|down [--note ...]")
     return "\n".join(lines)
 
 
-def _entry(prefix: str, paper: RankedPaper | Candidate, show_id: bool = False) -> list[str]:
+def _entry(
+    prefix: str,
+    paper: RankedPaper | Candidate,
+    verdict: Feedback | None = None,
+    show_id: bool = False,
+) -> list[str]:
     assessment = paper.score.assessment
     lines = textwrap.wrap(
         paper.title, WIDTH, initial_indent=prefix, subsequent_indent=" " * len(prefix)
@@ -64,6 +72,11 @@ def _entry(prefix: str, paper: RankedPaper | Candidate, show_id: bool = False) -
     lines.append(INDENT + _link(paper))
     if show_id:
         lines.append(f"{INDENT}id: {paper.id}")
+    if verdict:
+        mark = "👍 worth reading" if verdict.worth_reading else "👎 not worth it"
+        lines.append(
+            f"{INDENT}your feedback: {mark}" + (f": {verdict.note}" if verdict.note else "")
+        )
     return lines
 
 

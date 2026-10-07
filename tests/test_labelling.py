@@ -9,7 +9,7 @@ from paperpulse.labelling import (
     record_feedback,
     resolve_paper,
 )
-from paperpulse.models import Label
+from paperpulse.models import Feedback, Label
 from paperpulse.pipeline import select
 from paperpulse.store import Store
 from tests.conftest import FakeEmbedder, FakeLLM, make_paper
@@ -24,9 +24,9 @@ def _label(pid: str, relevant: bool, source="pool") -> Label:
 def test_later_labels_replace_earlier_ones(store):
     store.upsert_papers([make_paper(1)])
     store.set_label(_label("pmid:1", True))
-    store.set_label(_label("pmid:1", False, source="feedback"))
+    store.set_label(_label("pmid:1", False, source="import"))
     labels = store.get_labels()
-    assert (labels["pmid:1"].relevant, labels["pmid:1"].source) == (False, "feedback")
+    assert (labels["pmid:1"].relevant, labels["pmid:1"].source) == (False, "import")
 
 
 def test_labels_follow_a_paper_that_gains_a_doi(store):
@@ -52,12 +52,30 @@ def test_resolve_paper_by_digest_rank_doi_or_pmid(store, config, embedder):
     assert resolve_paper(store, "10.9/missing") is None
 
 
-def test_feedback_is_stored_as_a_label(store):
-    store.upsert_papers([make_paper(1)])
-    record_feedback(store, make_paper(1), relevant=True, note="great method", now=NOW)
-    assert store.get_labels()["pmid:1"] == Label(
-        paper_id="pmid:1", relevant=True, source="feedback", note="great method", labelled_at=NOW
-    )
+def test_feedback_is_stored_apart_and_never_touches_labels(store):
+    store.upsert_papers([make_paper(1), make_paper(2)])
+    store.set_label(_label("pmid:1", True))  # judged relevant from the abstract
+
+    record_feedback(store, make_paper(1), worth_reading=False, note="thin methods", now=NOW)
+    record_feedback(store, make_paper(2), worth_reading=True, now=NOW)
+
+    assert store.get_labels() == {"pmid:1": _label("pmid:1", True)}  # unchanged, nothing added
+    assert store.get_feedback() == {
+        "pmid:1": Feedback(
+            paper_id="pmid:1", worth_reading=False, note="thin methods", given_at=NOW
+        ),
+        "pmid:2": Feedback(paper_id="pmid:2", worth_reading=True, given_at=NOW),
+    }
+
+
+def test_feedback_does_not_keep_papers_out_of_the_labelling_pool(store, config, embedder):
+    from paperpulse.evaluation import labelling_pool
+
+    papers = [make_paper(n, abstract="fhir interoperability") for n in (1, 2)]
+    store.upsert_papers(papers)
+    record_feedback(store, papers[0], worth_reading=True)
+    pool = labelling_pool(store, config, embedder, papers, depth=12)
+    assert {p.pmid for p in pool} == {"1", "2"}
 
 
 def test_interactive_labelling_handles_skip_invalid_and_quit(store):
@@ -118,9 +136,14 @@ def test_cli_feedback_and_export(tmp_path, capsys, monkeypatch):
     assert "👍 Paper 1" in capsys.readouterr().out
     assert cli.main([*base, "feedback", "7", "down"]) == 1
 
+    s = Store(db)
+    assert s.get_feedback()["pmid:1"].note == "useful"
+    s.set_label(_label("pmid:1", False))
+    s.close()
+
     assert cli.main([*base, "labels", "export"]) == 0
     exported = json.loads(capsys.readouterr().out)
-    assert (exported["id"], exported["relevant"], exported["note"]) == ("pmid:1", True, "useful")
+    assert (exported["id"], exported["relevant"]) == ("pmid:1", False)  # the label, not feedback
 
 
 def _cli_setup(tmp_path, monkeypatch, toml_extra=""):

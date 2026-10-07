@@ -91,3 +91,17 @@ def test_cli_read_latest_or_by_date(tmp_path, capsys, monkeypatch):
         assert cli.main([*base, "read", *args]) == 0
         assert "1. FHIR paper" in capsys.readouterr().out
     assert cli.main([*base, "read", "1999-01-01"]) == 1
+
+
+def test_reading_list_shows_feedback_already_given(store, config, embedder):
+    from paperpulse.models import Feedback
+
+    digest = digest_with_extras(store, config, embedder)
+    verdicts = {
+        "10.1/nlp": Feedback(paper_id="10.1/nlp", worth_reading=True, note="great", given_at=NOW),
+        "10.1/fhir": Feedback(paper_id="10.1/fhir", worth_reading=False, given_at=NOW),
+    }
+    text = format_reading_list(digest, feedback=verdicts)
+    assert "your feedback: 👍 worth reading: great" in text
+    assert "your feedback: 👎 not worth it" in text
+    assert "your feedback" not in format_reading_list(digest)

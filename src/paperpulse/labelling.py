@@ -1,13 +1,21 @@
 """
-Collecting relevance labels: feedback on digests, interactive pool labelling,
-and JSONL export/import so an evaluation set can be versioned and shared.
+Human judgements, of two kinds kept strictly apart:
+
+labels    from title and abstract, via `paperpulse label` or an imported set.
+          The same information the ranking and the LLM see, so they are the
+          reference standard for `eval`.
+feedback  after reading the paper itself, via `paperpulse feedback`. A richer
+          verdict ("was it worth reading?") that never enters the evaluation set.
+
+Labels can be exported to and imported from JSONL so an evaluation set can be
+versioned and shared.
 """
 
 import json
 from collections.abc import Callable, Iterable, Iterator
 from datetime import UTC, datetime
 
-from paperpulse.models import Label, Paper
+from paperpulse.models import Feedback, Label, Paper
 from paperpulse.ranking.assess import MAX_ABSTRACT_CHARS
 from paperpulse.store import Store
 
@@ -22,17 +30,20 @@ def resolve_paper(store: Store, target: str) -> Paper | None:
 
 
 def record_feedback(
-    store: Store, paper: Paper, relevant: bool, note: str | None = None, now: datetime | None = None
-) -> Label:
-    label = Label(
+    store: Store,
+    paper: Paper,
+    worth_reading: bool,
+    note: str | None = None,
+    now: datetime | None = None,
+) -> Feedback:
+    feedback = Feedback(
         paper_id=paper.id,
-        relevant=relevant,
-        source="feedback",
+        worth_reading=worth_reading,
         note=note,
-        labelled_at=now or datetime.now(UTC),
+        given_at=now or datetime.now(UTC),
     )
-    store.set_label(label)
-    return label
+    store.set_feedback(feedback)
+    return feedback
 
 
 def label_interactively(

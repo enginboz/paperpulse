@@ -60,6 +60,8 @@ paperpulse select --no-record     # preview without marking papers as shown
 paperpulse select --no-llm        # skip the LLM stage, rank by similarity only
 paperpulse read                   # latest digest as a reading list: why, and a link
 paperpulse read --top-only        # without the runners-up the LLM also rated 4 or 5
+paperpulse feedback 1 up          # after reading: was pick 1 worth it? (rank, DOI or pmid:<id>)
+paperpulse feedback 2 down --note "thin methods"
 paperpulse history                # list saved digests
 paperpulse history 2026-10-02     # show one again (a date or a run id)
 paperpulse schema                 # JSON schema of the output
@@ -72,9 +74,7 @@ Global options: `-c/--config` (default `./paperpulse.toml`), `--db` (default `$P
 Every ranking decision in PaperPulse (mistral over llama3.2, hybrid over dense, the thresholds) should be backed by numbers, not by one week of eyeballing. The evaluation workflow makes that measurable against your own judgements:
 
 ```bash
-paperpulse feedback 1 up            # rate a digest pick (rank, DOI or pmid:<id>)
-paperpulse feedback 3 down --note "opinion piece"
-paperpulse label                    # rate a pool of papers interactively (y/n/skip/quit)
+paperpulse label                    # rate a pool of papers from title and abstract (y/n/skip/quit)
 paperpulse eval                     # compare ranking variants against your labels
 paperpulse eval --models mistral llama3.2   # compare LLMs on the same labels
 paperpulse eval --no-llm            # retrieval variants only, in seconds
@@ -83,7 +83,9 @@ paperpulse labels export labels.jsonl
 paperpulse labels import labels.jsonl   # re-fetches missing papers from PubMed
 ```
 
-Rating only what a digest showed would make the current ranking look perfect by construction, because nothing it missed ever gets judged. `paperpulse label` therefore asks about a **pool**: the union of the top papers of the dense, keyword and hybrid rankings, interleaved so that quitting early still covers the head of each (the pooling method used in TREC evaluations). The pool goes as deep as the LLM shortlist, so any paper an LLM could promote has a label instead of silently counting as not relevant.
+Labels are given from title and abstract only, the same information every ranking stage sees; judging with the full text in hand would hold the system to something it could not know. For the same reason, `paperpulse feedback` (your verdict after reading a paper) is stored separately and never enters the evaluation set.
+
+Rating only what a digest showed would also make the current ranking look perfect by construction, because nothing it missed ever gets judged. `paperpulse label` therefore asks about a **pool**: the union of the top papers of the dense, keyword and hybrid rankings, interleaved so that quitting early still covers the head of each (the pooling method used in TREC evaluations). The pool goes as deep as the LLM shortlist, so any paper an LLM could promote has a label instead of silently counting as not relevant.
 
 `paperpulse eval` re-ranks every labelled time window with each variant (dense, hybrid, and hybrid plus each LLM given with `--models`), using exactly the code path of `select`. Labels belong to papers, not to variants, so one label set serves every comparison. It reports:
 
@@ -188,7 +190,7 @@ src/paperpulse/
 │   ├── fusion.py         # reciprocal rank fusion
 │   └── assess.py         # per-paper LLM rubric with structured output
 ├── pipeline.py           # ingest(), select() and the shared rank_papers()
-├── labelling.py          # feedback, interactive pool labelling, JSONL export/import
+├── labelling.py          # pool labelling, feedback, JSONL export/import
 ├── evaluation.py         # pooling, P@k / R@n per variant, saved result records
 └── cli.py
 ```
@@ -203,6 +205,7 @@ v2 is a rewrite around three ideas: separate ingestion from selection so ranking
 
 - **Next:** widen the LLM shortlist (12 to 20 papers) and measure whether recall rises without hurting precision; [retrieval is currently the bottleneck](#results-so-far)
 - Learn from feedback, e.g. use papers rated 👍 as extra positive examples in the profile, validated with `paperpulse eval`
+- Compare abstract-level relevance (labels and LLM) with post-reading feedback: how well does the abstract predict a paper worth reading?
 - Cross-encoder reranking between retrieval and the LLM stage
 - Diversity (MMR) so the top picks don't all come from one topic
 - Europe PMC source, including preprints

@@ -7,7 +7,7 @@ Command-line interface.
     paperpulse schema            print the JSON schema of the digest
     paperpulse read              the latest digest as a reading list with links
     paperpulse history           list saved digests (history <date|run id> shows one)
-    paperpulse feedback 2 up     label a paper from the latest digest
+    paperpulse feedback 2 up     after reading: was digest pick 2 worth it?
     paperpulse label             label a pool of papers for evaluation
     paperpulse eval              compare ranking variants against the labels
     paperpulse labels export     write labels as JSONL (also: labels import FILE)
@@ -138,7 +138,7 @@ def _read(store: Store, run: str | None, extras: bool) -> int:
     digest = _find_run(runs, run) if run else runs[-1]
     if digest is None:
         return 1
-    print(format_reading_list(digest, extras=extras))
+    print(format_reading_list(digest, extras=extras, feedback=store.get_feedback()))
     return 0
 
 
@@ -162,7 +162,7 @@ def _labels_and_eval(args: argparse.Namespace, store: Store, config: Config) -> 
         if paper is None:
             logger.error("No paper %r in the latest digest or the store.", args.target)
             return 1
-        record_feedback(store, paper, relevant=args.verdict == "up", note=args.note)
+        record_feedback(store, paper, worth_reading=args.verdict == "up", note=args.note)
         print(f"{'👍' if args.verdict == 'up' else '👎'} {paper.title}")
         return 0
 
@@ -296,9 +296,13 @@ def _parser() -> argparse.ArgumentParser:
     history = commands.add_parser("history", help="list saved digests or show one")
     history.add_argument("run", nargs="?", help="a date (YYYY-MM-DD) or a run id prefix")
 
-    feedback = commands.add_parser("feedback", help="label a paper as relevant or not")
+    feedback = commands.add_parser(
+        "feedback", help="after reading a paper: was it worth it? (not used by eval)"
+    )
     feedback.add_argument("target", help="rank in the latest digest, a DOI, or pmid:<id>")
-    feedback.add_argument("verdict", choices=["up", "down"])
+    feedback.add_argument(
+        "verdict", choices=["up", "down"], help="up: worth reading; down: not worth it"
+    )
     feedback.add_argument("--note", help="optional free-text reason")
 
     label = commands.add_parser("label", help="interactively label a pool of papers")
