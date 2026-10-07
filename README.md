@@ -58,6 +58,8 @@ paperpulse select                 # rank and print the digest
 paperpulse select --top 5 -o digest.json
 paperpulse select --no-record     # preview without marking papers as shown
 paperpulse select --no-llm        # skip the LLM stage, rank by similarity only
+paperpulse read                   # latest digest as a reading list: why, and a link
+paperpulse read --top-only        # without the runners-up the LLM also rated 4 or 5
 paperpulse history                # list saved digests
 paperpulse history 2026-10-02     # show one again (a date or a run id)
 paperpulse schema                 # JSON schema of the output
