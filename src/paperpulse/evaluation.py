@@ -238,10 +238,15 @@ def format_report(results: list[VariantResult], k: int, n: int) -> str:
                 f"\nNote: only {cov:.0%} of the {r.name} shortlist has cached assessments; "
                 "unassessed papers are left out. Run without --cached-only to fill the cache."
             )
-    if windows and (judged := results[0].mean("judged")) is not None and judged < 0.8:
+    gaps = [
+        r.name
+        for r in results
+        if not r.unavailable and (judged := r.mean("judged")) is not None and judged < 1
+    ]
+    if gaps:
         lines.append(
-            "\nNote: many top-ranked papers are unlabelled and count as not relevant. "
-            "Run `paperpulse label` to widen coverage."
+            f"\nNote: some top-ranked papers of {', '.join(gaps)} are unlabelled and count as "
+            "not relevant. `paperpulse label --end <last day of that week>` labels them."
         )
     return "\n".join(lines)
 

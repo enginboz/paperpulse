@@ -217,3 +217,25 @@ def test_label_view_shows_as_much_abstract_as_the_llm_sees(store):
     assert len(llm_abstract) == MAX_ABSTRACT_CHARS
     assert llm_abstract in shown[0]
     assert shown[0].rstrip().endswith("…")
+
+
+def test_cli_label_offers_late_arrivals_of_the_previous_week_first(tmp_path, monkeypatch, capsys):
+    from datetime import timedelta
+
+    base = _cli_setup(tmp_path, monkeypatch)
+    s = Store(tmp_path / "pp.db")
+    late = make_paper(9, title="Late arrival", abstract="fhir", added=date.today() - timedelta(8))
+    old = make_paper(8, title="Labelled last week", abstract="fhir", added=late.added)
+    s.upsert_papers([late, old])
+    s.set_label(Label(paper_id="pmid:8", relevant=True, source="pool", labelled_at=NOW))
+    s.close()
+    shown = []
+    monkeypatch.setattr("builtins.print", lambda *a, **k: shown.append(" ".join(map(str, a))))
+    monkeypatch.setattr("builtins.input", lambda _: "q")
+
+    assert cli.main([*base, "label"]) == 0
+    text = "\n".join(shown)
+    assert "3 unlabelled papers" in text
+    assert "Plus 1 late arrival(s)" in text
+    first_paper = next(line for line in shown if line.startswith("\n[1/"))
+    assert "Late arrival" in first_paper

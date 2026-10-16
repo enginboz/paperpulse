@@ -206,3 +206,14 @@ def test_windows_can_be_anchored_to_the_labelling_day():
         (date(2026, 9, 19), date(2026, 9, 25)),
         (date(2026, 9, 26), date(2026, 10, 2)),
     ]
+
+
+def test_report_flags_unlabelled_picks_of_any_variant(store, config, embedder):
+    seed_hl7_week(store, config)
+    label(store, "pmid:1", False)  # dense's pick is labelled ...
+    llm = FakeLLM({"Interface engines": 5})  # ... the LLM's pick (paper 2) is not
+
+    results = evaluate(store, config, embedder, llms=[llm], k=1)
+    assert results[0].mean("judged") == 1.0
+    report = format_report(results, k=1, n=12)
+    assert "some top-ranked papers of hybrid, hybrid+fake-llm are unlabelled" in report

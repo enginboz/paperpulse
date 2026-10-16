@@ -21,7 +21,7 @@ import json
 import logging
 import os
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
@@ -187,16 +187,29 @@ def _labels_and_eval(args: argparse.Namespace, store: Store, config: Config) -> 
 
     embedder = SentenceTransformerEmbedder(config.embedding.model)
     if args.command == "label":
+        days = config.selection.window_days
         end = args.end or date.today()
-        start = window_start(end, config.selection.window_days)
-        papers = eligible_papers(store, config, start, end)
+        start = window_start(end, days)
         depth = args.depth or config.llm.candidates
-        pool = labelling_pool(store, config, embedder, papers, depth=depth)
+        # PubMed keeps adding records dated the labelling day after the session,
+        # so the previous window can gain papers its pool never showed. Those
+        # late arrivals are offered first, while they are still fresh.
+        prev_end = start - timedelta(days=1)
+        prev_start = window_start(prev_end, days)
+        late = labelling_pool(
+            store, config, embedder, eligible_papers(store, config, prev_start, prev_end), depth
+        )
+        current = labelling_pool(
+            store, config, embedder, eligible_papers(store, config, start, end), depth
+        )
+        pool = late + current
         if not pool:
-            logger.warning("Nothing to label between %s and %s.", start, end)
+            logger.warning("Nothing to label between %s and %s.", prev_start, end)
             return 0
-        print(f"{len(pool)} unlabelled papers from the top {depth} of each ranking, ", end="")
+        print(f"{len(current)} unlabelled papers from the top {depth} of each ranking, ", end="")
         print(f"{start} to {end}.")
+        if late:
+            print(f"Plus {len(late)} late arrival(s) from {prev_start} to {prev_end}, shown first.")
         written = label_interactively(store, pool)
         print(f"\n{written} labels saved.")
         return 0
