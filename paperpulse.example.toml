@@ -81,6 +81,10 @@ enabled = true
 # Nothing leaves your machine, but expect ~30-60 s per paper on a laptop CPU.
 provider = "ollama"
 model = "mistral"
+# Ollama on another machine: set OLLAMA_BASE_URL in .env. If that machine sleeps,
+# PaperPulse can wake it and wait up to wake_timeout seconds before giving up.
+# wake_command = "wakeonlan aa:bb:cc:dd:ee:ff"
+# wake_timeout = 120
 
 # Cloud: Claude via the Anthropic API. Seconds per paper; only public abstracts are sent.
 # Requires `uv sync --extra anthropic` and ANTHROPIC_API_KEY.

@@ -107,7 +107,12 @@ def select(
         shortlist=shortlist,
     )
     if record and ranked:
-        store.save_run(digest)
+        if llm is not None and llm_used is None:
+            # Saving would mark these papers as shown for a week, although no
+            # LLM ever judged them. Leave them for a run with the LLM up.
+            logger.warning("Digest not saved because the LLM was unavailable.")
+        else:
+            store.save_run(digest)
     return digest
 
 

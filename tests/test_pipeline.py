@@ -185,3 +185,14 @@ def test_digest_keeps_the_assessed_shortlist_including_rejects(store, config, em
 def test_digest_without_llm_has_no_shortlist(store, config, embedder):
     seed(store)
     assert select(store, config, embedder, now=NOW).shortlist == []
+
+
+def test_digest_is_not_saved_when_the_llm_was_unavailable(store, config, embedder):
+    seed(store)
+    llm = FakeLLM(responses=iter([LLMUnavailable("asleep")]))
+    digest = select(store, config, embedder, llm=llm, now=NOW)
+    assert digest.papers  # still shown, ranked by retrieval
+    assert store.latest_run() is None  # but not saved: the papers stay available
+
+    without_llm = select(store, config, embedder, now=NOW)  # LLM not configured at all
+    assert store.latest_run() == without_llm

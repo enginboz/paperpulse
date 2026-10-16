@@ -10,6 +10,11 @@ gets back a validated instance of it.
 """
 
 import json
+import logging
+import shlex
+import subprocess
+import time
+from collections.abc import Callable
 from typing import Protocol, TypeVar
 
 import httpx
@@ -18,6 +23,9 @@ from pydantic import BaseModel
 from paperpulse.config import LLM as LLMConfig
 
 T = TypeVar("T", bound=BaseModel)
+
+logger = logging.getLogger(__name__)
+WAKE_POLL_SECONDS = 5
 
 
 class LLMUnavailable(Exception):
@@ -122,6 +130,42 @@ class AnthropicLLM:
         if response.parsed_output is None:
             raise ValueError(f"no structured output (stop_reason={response.stop_reason})")
         return response.parsed_output
+
+
+def wake_if_needed(
+    config: LLMConfig,
+    client: httpx.Client | None = None,
+    run: Callable = subprocess.run,
+    sleep: Callable[[float], None] = time.sleep,
+) -> bool:
+    """
+    True if the Ollama server answers, after running `wake_command` and waiting
+    for it when it does not. Other providers are always considered awake.
+    """
+    if config.provider != "ollama":
+        return True
+    client = client or httpx.Client(timeout=3)
+    url = f"{config.base_url.rstrip('/')}/api/version"
+
+    def answers() -> bool:
+        try:
+            return client.get(url).status_code == 200
+        except httpx.HTTPError:
+            return False
+
+    if answers():
+        return True
+    if not config.wake_command:
+        return False
+    logger.info("LLM server at %s is not answering; waking it", config.base_url)
+    run(shlex.split(config.wake_command), check=False)
+    for _ in range(max(1, config.wake_timeout // WAKE_POLL_SECONDS)):
+        sleep(WAKE_POLL_SECONDS)
+        if answers():
+            logger.info("LLM server is up")
+            return True
+    logger.warning("LLM server did not wake within %d s", config.wake_timeout)
+    return False
 
 
 def create_llm(config: LLMConfig) -> LLM:

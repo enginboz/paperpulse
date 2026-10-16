@@ -43,7 +43,7 @@ from paperpulse.labelling import (
     record_feedback,
     resolve_paper,
 )
-from paperpulse.llm import LLM, create_llm
+from paperpulse.llm import LLM, create_llm, wake_if_needed
 from paperpulse.models import Digest
 from paperpulse.pipeline import ingest, select, window_start
 from paperpulse.reading import format_reading_list
@@ -245,6 +245,9 @@ def _labels_and_eval(args: argparse.Namespace, store: Store, config: Config) -> 
 
 
 def _llm(config: Config) -> LLM:
+    # If waking fails, the first request raises LLMUnavailable and the run
+    # degrades visibly (retrieval-only ranking, digest not saved).
+    wake_if_needed(config.llm)
     return create_llm(config.llm)
 
 

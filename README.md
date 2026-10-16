@@ -26,7 +26,7 @@ select   time window ──▶ hard filters ──┬─▶ dense retrieval ─�
 
 The two rankings are merged with [reciprocal rank fusion](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf), which uses positions only, so similarity and BM25 scores never have to be put on one scale. On one week of real data, the keyword side pulled two papers into the LLM shortlist that embeddings had ranked 20th and 22nd (LLM-based pneumonia detection in radiology reports, and fact-checked medical question answering). The LLM rated both 5/5; one 5/5 paper that embeddings alone had kept (AI triage of vessel occlusion on CT) dropped out in exchange, so the shortlist gained one top-rated paper net. Over [four weeks of evaluation](#results-so-far), hybrid retrieval showed more relevant papers than dense (9 against 7 of 12 picks), though it did not reach more of them.
 
-**An LLM judges each shortlisted paper on its own.** The best papers after fusion are assessed one at a time against a 1–5 rubric and your free-text preferences (for example, "original research over opinion pieces"). The model returns structured output: study type, a one-sentence rationale written before the score, and the relevance score. Judging papers individually, instead of asking for "the best 3 of these 20", keeps the task small enough for a local model, removes position bias, and makes every verdict cacheable and inspectable. Papers rated below a threshold are never shown, so a quiet week yields fewer picks rather than filler.
+**An LLM judges each shortlisted paper on its own.** The best papers after fusion are assessed one at a time against a 1–5 rubric and your free-text preferences (for example, "original research over opinion pieces"). The model returns structured output: study type, a one-sentence rationale written before the score, and the relevance score. Judging papers individually, instead of asking for "the best 3 of these 20", keeps the task small enough for a local model, removes position bias, and makes every verdict cacheable and inspectable. Papers rated below a threshold are never shown, so a quiet week yields fewer picks rather than filler. If the LLM cannot be reached, the digest is ranked by retrieval alone, marked with `"llm_model": null`, and not saved, so its papers stay available for a run with the LLM.
 
 In an early spot check on five papers, a 3B model (`llama3.2`) rated everything 5/5 and mislabelled opinion pieces as systematic reviews, while `mistral` (7B) separated them correctly. Over [four weeks of evaluation](#results-so-far), however, both models picked the same number of relevant papers, and both pass most papers through. In a [comparison of small models](#small-models-on-a-4-gb-gpu), `qwen3:4b-instruct` was the only clearly selective one, and it runs on a 4 GB GPU in seconds per paper. `mistral` stays the default for now, with Claude as a much faster cloud option.
 
@@ -197,7 +197,7 @@ Besides the selected `papers`, every digest carries its `shortlist`: all papers 
 | `PUBMED_EMAIL` | Contact email sent with NCBI requests (recommended) |
 | `NCBI_API_KEY` | Optional; raises the NCBI rate limit from 3 to 10 requests/s |
 | `PAPERPULSE_DB` | Database path, if not `./paperpulse.db` |
-| `OLLAMA_BASE_URL` | Ollama server, if not `http://localhost:11434` |
+| `OLLAMA_BASE_URL` | Ollama server, if not `http://localhost:11434`; a server that sleeps can be woken with `[llm] wake_command`, e.g. a Wake-on-LAN call |
 | `ANTHROPIC_API_KEY` | Required for `provider = "anthropic"` |
 
 ## Project structure

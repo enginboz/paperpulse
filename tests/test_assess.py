@@ -7,7 +7,7 @@ import pytest
 
 from paperpulse.config import LLM as LLMConfig
 from paperpulse.config import Profile
-from paperpulse.llm import AnthropicLLM, LLMUnavailable, OllamaLLM, create_llm
+from paperpulse.llm import AnthropicLLM, LLMUnavailable, OllamaLLM, create_llm, wake_if_needed
 from paperpulse.models import Assessment
 from paperpulse.ranking.assess import (
     MAX_ABSTRACT_CHARS,
@@ -207,3 +207,42 @@ def test_a_stuck_paper_is_skipped_and_the_rest_assessed(store):
     store.upsert_papers([make_paper(1), make_paper(2)])
     llm = FakeLLM(responses=iter([ValueError("timed out"), ValueError("timed out"), VALID]))
     assert list(assess_papers(store, llm, PROFILE, [make_paper(1), make_paper(2)])) == ["pmid:2"]
+
+
+def _server(states):
+    """A fake Ollama that answers /api/version according to successive states (True = up)."""
+    states = iter(states)
+
+    def handler(request):
+        if next(states):
+            return httpx.Response(200, json={"version": "test"})
+        raise httpx.ConnectError("asleep")
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def test_wake_does_nothing_when_the_server_answers():
+    calls = []
+    config = LLMConfig(base_url="http://srv:11434", wake_command="wakeonlan aa:bb")
+    assert wake_if_needed(config, client=_server([True]), run=lambda *a, **k: calls.append(a))
+    assert calls == []
+
+
+def test_wake_runs_the_command_and_waits_for_the_server():
+    calls = []
+    config = LLMConfig(base_url="http://srv:11434", wake_command="wakeonlan aa:bb:cc")
+    awake = wake_if_needed(
+        config,
+        client=_server([False, False, False, True]),
+        run=lambda cmd, **k: calls.append(cmd),
+        sleep=lambda _: None,
+    )
+    assert awake and calls == [["wakeonlan", "aa:bb:cc"]]
+
+
+def test_wake_gives_up_after_the_timeout_or_without_a_command():
+    config = LLMConfig(base_url="http://srv:11434", wake_command="wakeonlan x", wake_timeout=10)
+    asleep = _server([False] * 10)
+    assert not wake_if_needed(config, client=asleep, run=lambda *a, **k: None, sleep=lambda _: None)
+    assert not wake_if_needed(LLMConfig(base_url="http://srv:11434"), client=_server([False]))
+    assert wake_if_needed(LLMConfig(provider="anthropic"))

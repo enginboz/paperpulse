@@ -103,6 +103,12 @@ class LLM(BaseModel):
         description="Ollama only",
     )
     effort: Literal["low", "medium", "high"] = Field(default="low", description="Anthropic only")
+    wake_command: str | None = Field(
+        default=None,
+        description="Ollama only: command that wakes a sleeping LLM server, "
+        "e.g. a Wake-on-LAN call; run when the server does not answer",
+    )
+    wake_timeout: int = Field(default=120, ge=0, description="Seconds to wait after waking")
     candidates: int = Field(default=12, description="How many dense-ranked papers the LLM assesses")
     min_relevance: int = Field(
         default=3, ge=1, le=5, description="Drop papers the LLM rates below this"
