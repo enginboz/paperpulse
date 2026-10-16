@@ -92,7 +92,7 @@ def test_ollama_sends_schema_and_parses_content():
     result = _ollama(handler).complete("sys", "user", Assessment)
     assert result == Assessment(**VALID)
     assert sent["format"] == Assessment.model_json_schema()
-    assert sent["options"]["temperature"] == 0
+    assert sent["options"] == {"temperature": 0, "num_predict": OllamaLLM.MAX_OUTPUT_TOKENS}
     assert [m["role"] for m in sent["messages"]] == ["system", "user"]
 
 
@@ -175,3 +175,35 @@ def test_provider_defaults():
         "claude-haiku-4-5"
     )
     assert isinstance(create_llm(LLMConfig()), OllamaLLM)
+
+
+@pytest.mark.parametrize(
+    "handler, message",
+    [
+        (
+            lambda _: httpx.Response(
+                200, json={"done_reason": "length", "message": {"content": "{"}}
+            ),
+            "output limit",
+        ),
+        (lambda _: httpx.Response(500), "HTTP 500"),
+    ],
+)
+def test_ollama_runaway_or_failed_answers_are_bad_responses(handler, message):
+    with pytest.raises(ValueError, match=message):
+        _ollama(handler).complete("s", "u", Assessment)
+
+
+def test_ollama_timeout_is_a_bad_response_not_an_outage():
+    def handler(request):
+        raise httpx.ReadTimeout("stuck")
+
+    with pytest.raises(ValueError, match="timed out") as excinfo:
+        _ollama(handler).complete("s", "u", Assessment)
+    assert not isinstance(excinfo.value, LLMUnavailable)
+
+
+def test_a_stuck_paper_is_skipped_and_the_rest_assessed(store):
+    store.upsert_papers([make_paper(1), make_paper(2)])
+    llm = FakeLLM(responses=iter([ValueError("timed out"), ValueError("timed out"), VALID]))
+    assert list(assess_papers(store, llm, PROFILE, [make_paper(1), make_paper(2)])) == ["pmid:2"]

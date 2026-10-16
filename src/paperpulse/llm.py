@@ -35,6 +35,10 @@ class LLM(Protocol):
 class OllamaLLM:
     """Ollama's chat API with `format` set to a JSON schema, which constrains decoding to it."""
 
+    # A complete assessment is ~150 tokens. Small models occasionally loop under
+    # schema-constrained decoding and would otherwise write until the timeout.
+    MAX_OUTPUT_TOKENS = 512
+
     def __init__(self, model: str, base_url: str, client: httpx.Client | None = None):
         self.name = model
         self.base_url = base_url.rstrip("/")
@@ -52,15 +56,23 @@ class OllamaLLM:
                     ],
                     "format": output.model_json_schema(),
                     "stream": False,
-                    "options": {"temperature": 0},
+                    "options": {"temperature": 0, "num_predict": self.MAX_OUTPUT_TOKENS},
                 },
             )
         except httpx.ConnectError as e:
             raise LLMUnavailable(f"cannot reach Ollama at {self.base_url}") from e
+        except httpx.TimeoutException as e:
+            # One stuck request is a bad answer for this paper, not an outage.
+            raise ValueError(f"{self.name} timed out") from e
         if response.status_code == 404:
             raise LLMUnavailable(f"model {self.name!r} not found; run `ollama pull {self.name}`")
+        if response.status_code >= 500:
+            raise ValueError(f"{self.name} failed with HTTP {response.status_code}")
         response.raise_for_status()
-        return output.model_validate(json.loads(response.json()["message"]["content"]))
+        data = response.json()
+        if data.get("done_reason") == "length":
+            raise ValueError(f"{self.name} hit the {self.MAX_OUTPUT_TOKENS}-token output limit")
+        return output.model_validate(json.loads(data["message"]["content"]))
 
 
 class AnthropicLLM:
