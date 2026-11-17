@@ -323,7 +323,7 @@ def test_groq_outages(response, api_key, match):
     "response, match",
     [
         (_groq_answer(finish_reason="length"), "token limit"),
-        (httpx.Response(400, text="json_validate_failed"), "rejected the request"),
+        (httpx.Response(400, text="context_length_exceeded"), "rejected the request"),
         (httpx.Response(503), "HTTP 503"),
         (_groq_answer({"relevance": 9}), "validation error"),
     ],
@@ -342,3 +342,22 @@ def test_provider_prefixes_for_eval_models():
     assert _model_spec("qwen3:4b-instruct", "ollama") == ("ollama", "qwen3:4b-instruct")
     assert _model_spec("mistral", "ollama") == ("ollama", "mistral")
     assert create_llm(LLMConfig(provider="groq")).name == "openai/gpt-oss-120b"
+
+
+def test_groq_retries_an_empty_schema_failure_with_more_reasoning():
+    efforts = []
+
+    def handler(request):
+        efforts.append(json.loads(request.content)["reasoning_effort"])
+        if len(efforts) == 1:
+            return httpx.Response(400, text='{"error": {"code": "json_validate_failed"}}')
+        return _groq_answer()
+
+    assert _groq(handler).complete("s", "u", Assessment) == Assessment(**VALID)
+    assert efforts == ["low", "medium"]
+
+
+def test_groq_gives_up_when_more_reasoning_does_not_help():
+    failure = httpx.Response(400, text='{"error": {"code": "json_validate_failed"}}')
+    with pytest.raises(ValueError, match="no valid JSON \\(effort medium\\)"):
+        _groq(lambda _: failure).complete("s", "u", Assessment)

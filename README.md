@@ -133,6 +133,17 @@ P@3 rests on 12 picks per model, so the table adds a less noisy view: how each m
 
 With 47 papers these differences are indicative rather than significant.
 
+#### A large cloud model: gpt-oss-120b on Groq
+
+`openai/gpt-oss-120b`, about 30 times the size of `qwen3:4b-instruct`, hosted by Groq, against the same labels (five weeks to 23 Oct, 53 labelled shortlist papers, 31 relevant). Source: [result file](evaluation/results/2026-11-17T214343.json).
+
+| LLM | P@3, weeks 1-4 | passes filter | precision | recall | agreement |
+|---|---|---|---|---|---|
+| `qwen3:4b-instruct` (4 GB GPU) | 11 of 12 | 29 of 53 | 83% | 77% | 77% |
+| `gpt-oss-120b` (Groq) | 11 of 12 | 16 of 53 | 88% | 45% | 64% |
+
+Both pick almost only relevant papers, but `gpt-oss-120b` is far stricter: it rates most papers 2 and rejects more than half of the relevant ones, so the small local model agrees with the labels more often. The fifth week is left out of P@3 because papers that arrived after its labelling session are still unlabelled. At low reasoning effort, `gpt-oss-120b` occasionally returns no output for a paper; PaperPulse then retries that paper with medium effort.
+
 The earlier [two-week result](evaluation/results/2026-10-02T135101.json) is kept for reference, but its numbers are not directly comparable, for two reasons that are worth knowing:
 
 1. **Late arrivals.** PubMed keeps adding records dated a given day after that day; a labelling session on Friday misses papers dated Friday that arrive later. Unlabelled, they count as not relevant. `paperpulse label` now offers the previous week's late arrivals first.

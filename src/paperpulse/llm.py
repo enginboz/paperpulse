@@ -135,6 +135,10 @@ class AnthropicLLM:
         return response.parsed_output
 
 
+class _SchemaFailure(ValueError):
+    """Groq rejected the model's output as not matching the schema."""
+
+
 class GroqLLM:
     """
     Groq's OpenAI-compatible chat API with a strict JSON schema. Rate limits
@@ -161,9 +165,24 @@ class GroqLLM:
         self.client = client or httpx.Client(timeout=120)
         self.sleep = sleep
 
+    EFFORTS = ("low", "medium", "high")
+
     def complete(self, system: str, user: str, output: type[T]) -> T:
         if not self.api_key:
             raise LLMUnavailable("GROQ_API_KEY is not set")
+        try:
+            return self._complete(system, user, output, self.effort)
+        except _SchemaFailure:
+            # gpt-oss at low effort sometimes produces no output at all for a
+            # paper, deterministically at temperature 0. One step more
+            # reasoning got every such case through in testing.
+            higher = self.EFFORTS[min(self.EFFORTS.index(self.effort) + 1, 2)]
+            if higher == self.effort or not self.name.startswith("openai/gpt-oss"):
+                raise
+            logger.info("Retrying with reasoning effort %s", higher)
+            return self._complete(system, user, output, higher)
+
+    def _complete(self, system: str, user: str, output: type[T], effort: str) -> T:
         body = {
             "model": self.name,
             "messages": [
@@ -182,7 +201,7 @@ class GroqLLM:
             "max_completion_tokens": self.MAX_COMPLETION_TOKENS,
         }
         if self.name.startswith("openai/gpt-oss"):
-            body["reasoning_effort"] = self.effort
+            body["reasoning_effort"] = effort
             body["include_reasoning"] = False
 
         for _ in range(self.RATE_LIMIT_RETRIES):
@@ -204,7 +223,8 @@ class GroqLLM:
         if response.status_code >= 500:
             raise ValueError(f"{self.name} failed with HTTP {response.status_code}")
         if response.status_code == 400:
-            # e.g. the model produced output that failed the schema server-side
+            if "json_validate_failed" in response.text:
+                raise _SchemaFailure(f"{self.name} produced no valid JSON (effort {effort})")
             raise ValueError(f"{self.name} rejected the request: {response.text[:200]}")
         response.raise_for_status()
         choice = response.json()["choices"][0]

@@ -236,7 +236,7 @@ def _labels_and_eval(args: argparse.Namespace, store: Store, config: Config) -> 
     if args.json:
         print(json.dumps(record, indent=2, ensure_ascii=False))
     else:
-        print(format_report(results, k=k, n=config.llm.candidates))
+        print(format_report(results, k=k, n=config.llm.candidates, cached_only=args.cached_only))
     if not args.no_save and results[0].windows:
         path = save_evaluation(record, labels_jsonl, args.save_dir)
         logger.info("Result saved to %s, label set to %s", path, args.save_dir / "labels.jsonl")

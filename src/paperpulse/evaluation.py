@@ -210,7 +210,7 @@ def evaluate(
     return results
 
 
-def format_report(results: list[VariantResult], k: int, n: int) -> str:
+def format_report(results: list[VariantResult], k: int, n: int, cached_only: bool = False) -> str:
     def pct(value: float | None) -> str:
         return "   -" if value is None else f"{value:4.0%}"
 
@@ -235,8 +235,13 @@ def format_report(results: list[VariantResult], k: int, n: int) -> str:
     for r in llm_rows:
         if (cov := r.mean("assessed")) < 1:
             lines.append(
-                f"\nNote: only {cov:.0%} of the {r.name} shortlist has cached assessments; "
-                "unassessed papers are left out. Run without --cached-only to fill the cache."
+                f"\nNote: only {cov:.0%} of the {r.name} shortlist was assessed; unassessed "
+                "papers are left out. "
+                + (
+                    "Run without --cached-only to fill the cache."
+                    if cached_only
+                    else "The model gave no valid answer for them (see the log above)."
+                )
             )
     gaps = [
         r.name
