@@ -7,7 +7,14 @@ import pytest
 
 from paperpulse.config import LLM as LLMConfig
 from paperpulse.config import Profile
-from paperpulse.llm import AnthropicLLM, LLMUnavailable, OllamaLLM, create_llm, wake_if_needed
+from paperpulse.llm import (
+    AnthropicLLM,
+    GroqLLM,
+    LLMUnavailable,
+    OllamaLLM,
+    create_llm,
+    wake_if_needed,
+)
 from paperpulse.models import Assessment
 from paperpulse.ranking.assess import (
     MAX_ABSTRACT_CHARS,
@@ -246,3 +253,92 @@ def test_wake_gives_up_after_the_timeout_or_without_a_command():
     assert not wake_if_needed(config, client=asleep, run=lambda *a, **k: None, sleep=lambda _: None)
     assert not wake_if_needed(LLMConfig(base_url="http://srv:11434"), client=_server([False]))
     assert wake_if_needed(LLMConfig(provider="anthropic"))
+
+
+def _groq(handler, api_key="gsk_test", sleeps=None):
+    return GroqLLM(
+        "openai/gpt-oss-120b",
+        "low",
+        api_key=api_key,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        sleep=(sleeps.append if sleeps is not None else lambda _: None),
+    )
+
+
+def _groq_answer(content=VALID, finish_reason="stop"):
+    return httpx.Response(
+        200,
+        json={
+            "choices": [
+                {"finish_reason": finish_reason, "message": {"content": json.dumps(content)}}
+            ]
+        },
+    )
+
+
+def test_groq_sends_a_strict_schema_and_low_reasoning_effort():
+    sent = {}
+
+    def handler(request):
+        sent["auth"] = request.headers["authorization"]
+        sent.update(json.loads(request.content))
+        return _groq_answer()
+
+    assert _groq(handler).complete("sys", "user", Assessment) == Assessment(**VALID)
+    assert sent["auth"] == "Bearer gsk_test"
+    fmt = sent["response_format"]["json_schema"]
+    assert fmt["strict"] is True and fmt["name"] == "Assessment"
+    assert fmt["schema"]["additionalProperties"] is False
+    assert fmt["schema"]["required"] == ["study_type", "rationale", "relevance"]
+    assert "minimum" not in json.dumps(fmt["schema"])
+    assert (sent["reasoning_effort"], sent["include_reasoning"], sent["temperature"]) == (
+        "low",
+        False,
+        0,
+    )
+
+
+def test_groq_waits_out_short_rate_limits():
+    responses = iter([httpx.Response(429, headers={"retry-after": "7"}), _groq_answer()])
+    sleeps = []
+    assert _groq(lambda _: next(responses), sleeps=sleeps).complete("s", "u", Assessment)
+    assert sleeps == [7.0]
+
+
+@pytest.mark.parametrize(
+    "response, api_key, match",
+    [
+        (httpx.Response(429, headers={"retry-after": "3600"}), "k", "daily budget"),
+        (httpx.Response(401), "k", "rejected GROQ_API_KEY"),
+        (httpx.Response(404), "k", "no model"),
+        (None, "", "GROQ_API_KEY is not set"),
+    ],
+)
+def test_groq_outages(response, api_key, match):
+    with pytest.raises(LLMUnavailable, match=match):
+        _groq(lambda _: response, api_key=api_key).complete("s", "u", Assessment)
+
+
+@pytest.mark.parametrize(
+    "response, match",
+    [
+        (_groq_answer(finish_reason="length"), "token limit"),
+        (httpx.Response(400, text="json_validate_failed"), "rejected the request"),
+        (httpx.Response(503), "HTTP 503"),
+        (_groq_answer({"relevance": 9}), "validation error"),
+    ],
+)
+def test_groq_bad_answers_are_retried_per_paper_not_outages(response, match):
+    with pytest.raises(ValueError, match=match) as excinfo:
+        _groq(lambda _: response).complete("s", "u", Assessment)
+    assert not isinstance(excinfo.value, LLMUnavailable)
+
+
+def test_provider_prefixes_for_eval_models():
+    from paperpulse.cli import _model_spec
+
+    assert _model_spec("groq:openai/gpt-oss-120b", "ollama") == ("groq", "openai/gpt-oss-120b")
+    assert _model_spec("ollama:qwen3:4b-instruct", "groq") == ("ollama", "qwen3:4b-instruct")
+    assert _model_spec("qwen3:4b-instruct", "ollama") == ("ollama", "qwen3:4b-instruct")
+    assert _model_spec("mistral", "ollama") == ("ollama", "mistral")
+    assert create_llm(LLMConfig(provider="groq")).name == "openai/gpt-oss-120b"

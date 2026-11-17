@@ -26,7 +26,7 @@ from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 
-from paperpulse.config import Config, load_config
+from paperpulse.config import PROVIDERS, Config, load_config
 from paperpulse.embeddings import SentenceTransformerEmbedder
 from paperpulse.evaluation import (
     eligible_papers,
@@ -216,9 +216,10 @@ def _labels_and_eval(args: argparse.Namespace, store: Store, config: Config) -> 
 
     llms = []
     if not args.no_llm and config.llm.enabled:
-        for model in args.models or [config.llm.resolved_model]:
+        for spec in args.models or [config.llm.resolved_model]:
             model_config = config.model_copy(deep=True)
-            model_config.llm.model = model
+            provider, model = _model_spec(spec, config.llm.provider)
+            model_config.llm.provider, model_config.llm.model = provider, model
             llms.append(_llm(model_config))
     k = args.k or config.selection.top
     results = evaluate(
@@ -242,6 +243,16 @@ def _labels_and_eval(args: argparse.Namespace, store: Store, config: Config) -> 
         if not record["complete"]:
             logger.warning("Saved as incomplete: %s", "; ".join(record["incomplete_reasons"]))
     return 0
+
+
+def _model_spec(spec: str, default_provider: str) -> tuple[str, str]:
+    """
+    "groq:openai/gpt-oss-120b" names its provider; a bare model uses the
+    configured one. Only known provider names count as a prefix, because Ollama
+    tags contain colons too ("qwen3:4b-instruct").
+    """
+    prefix, _, rest = spec.partition(":")
+    return (prefix, rest) if prefix in PROVIDERS and rest else (default_provider, spec)
 
 
 def _llm(config: Config) -> LLM:
@@ -338,7 +349,8 @@ def _parser() -> argparse.ArgumentParser:
         "--models",
         nargs="+",
         metavar="MODEL",
-        help="compare these LLMs, one hybrid+<model> row each (default: llm.model)",
+        help="compare these LLMs, one hybrid+<model> row each (default: llm.model); "
+        "prefix a provider to mix them, e.g. groq:openai/gpt-oss-120b ollama:qwen3:4b-instruct",
     )
     evaluate_cmd.add_argument("--no-llm", action="store_true", help="skip the LLM variants")
     evaluate_cmd.add_argument(

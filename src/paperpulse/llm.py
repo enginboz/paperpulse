@@ -7,10 +7,13 @@ gets back a validated instance of it.
     ollama     local models, the default; nothing leaves the machine
     anthropic  Claude via the API (`uv sync --extra anthropic`, ANTHROPIC_API_KEY);
                much faster than a local model on a laptop CPU
+    groq       open models hosted by Groq (GROQ_API_KEY), e.g. gpt-oss-120b;
+               fast, with a free tier whose token limits the client waits out
 """
 
 import json
 import logging
+import os
 import shlex
 import subprocess
 import time
@@ -132,6 +135,112 @@ class AnthropicLLM:
         return response.parsed_output
 
 
+class GroqLLM:
+    """
+    Groq's OpenAI-compatible chat API with a strict JSON schema. Rate limits
+    (HTTP 429) are waited out when short; a long wait, such as an exhausted
+    daily token budget, counts as the provider being unavailable.
+    """
+
+    URL = "https://api.groq.com/openai/v1/chat/completions"
+    MAX_COMPLETION_TOKENS = 2048  # reasoning tokens plus the ~150-token answer
+    MAX_RATE_LIMIT_WAIT = 120
+    RATE_LIMIT_RETRIES = 5
+
+    def __init__(
+        self,
+        model: str,
+        effort: str,
+        api_key: str | None = None,
+        client: httpx.Client | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
+        self.name = model
+        self.effort = effort
+        self.api_key = api_key if api_key is not None else os.getenv("GROQ_API_KEY", "")
+        self.client = client or httpx.Client(timeout=120)
+        self.sleep = sleep
+
+    def complete(self, system: str, user: str, output: type[T]) -> T:
+        if not self.api_key:
+            raise LLMUnavailable("GROQ_API_KEY is not set")
+        body = {
+            "model": self.name,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": output.__name__,
+                    "strict": True,
+                    "schema": strict_schema(output.model_json_schema()),
+                },
+            },
+            "temperature": 0,
+            "max_completion_tokens": self.MAX_COMPLETION_TOKENS,
+        }
+        if self.name.startswith("openai/gpt-oss"):
+            body["reasoning_effort"] = self.effort
+            body["include_reasoning"] = False
+
+        for _ in range(self.RATE_LIMIT_RETRIES):
+            response = self._post(body)
+            if response.status_code != 429:
+                break
+            wait = float(response.headers.get("retry-after", 10))
+            if wait > self.MAX_RATE_LIMIT_WAIT:
+                raise LLMUnavailable(f"Groq rate limit, retry in {wait:.0f} s (daily budget?)")
+            logger.info("Groq rate limit reached, waiting %.0f s", wait)
+            self.sleep(wait)
+        else:
+            raise LLMUnavailable("Groq rate limit persists")
+
+        if response.status_code in (401, 403):
+            raise LLMUnavailable("Groq rejected GROQ_API_KEY")
+        if response.status_code == 404:
+            raise LLMUnavailable(f"Groq has no model {self.name!r}")
+        if response.status_code >= 500:
+            raise ValueError(f"{self.name} failed with HTTP {response.status_code}")
+        if response.status_code == 400:
+            # e.g. the model produced output that failed the schema server-side
+            raise ValueError(f"{self.name} rejected the request: {response.text[:200]}")
+        response.raise_for_status()
+        choice = response.json()["choices"][0]
+        if choice.get("finish_reason") == "length":
+            raise ValueError(f"{self.name} hit the {self.MAX_COMPLETION_TOKENS}-token limit")
+        return output.model_validate(json.loads(choice["message"]["content"]))
+
+    def _post(self, body: dict) -> httpx.Response:
+        try:
+            return self.client.post(
+                self.URL, json=body, headers={"Authorization": f"Bearer {self.api_key}"}
+            )
+        except httpx.ConnectError as e:
+            raise LLMUnavailable("cannot reach Groq") from e
+        except httpx.TimeoutException as e:
+            raise ValueError(f"{self.name} timed out") from e
+
+
+# Keywords strict mode is not documented to support; bounds are enforced by
+# validating the parsed answer instead.
+_UNSUPPORTED = {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "default"}
+
+
+def strict_schema(schema: dict) -> dict:
+    """Adapt a Pydantic JSON schema to strict mode: closed objects, every property required."""
+    if isinstance(schema, list):
+        return [strict_schema(s) for s in schema]
+    if not isinstance(schema, dict):
+        return schema
+    result = {k: strict_schema(v) for k, v in schema.items() if k not in _UNSUPPORTED}
+    if result.get("type") == "object" and "properties" in result:
+        result["additionalProperties"] = False
+        result["required"] = list(result["properties"])
+    return result
+
+
 def wake_if_needed(
     config: LLMConfig,
     client: httpx.Client | None = None,
@@ -171,4 +280,6 @@ def wake_if_needed(
 def create_llm(config: LLMConfig) -> LLM:
     if config.provider == "anthropic":
         return AnthropicLLM(config.resolved_model, config.effort)
+    if config.provider == "groq":
+        return GroqLLM(config.resolved_model, config.effort)
     return OllamaLLM(config.resolved_model, config.base_url)

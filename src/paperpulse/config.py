@@ -8,6 +8,7 @@ in the working directory, so the TOML file can be shared or committed:
     NCBI_API_KEY       optional, raises the NCBI rate limit from 3 to 10 req/s
     OLLAMA_BASE_URL    Ollama server (default http://localhost:11434)
     ANTHROPIC_API_KEY  for llm.provider = "anthropic"
+    GROQ_API_KEY       for llm.provider = "groq"
 """
 
 import os
@@ -91,18 +92,25 @@ class Embedding(BaseModel):
     model: str = "pritamdeka/S-PubMedBert-MS-MARCO"
 
 
-DEFAULT_MODELS = {"ollama": "mistral", "anthropic": "claude-opus-5-5"}
+DEFAULT_MODELS = {
+    "ollama": "mistral",
+    "anthropic": "claude-opus-5-5",
+    "groq": "openai/gpt-oss-120b",
+}
+PROVIDERS = tuple(DEFAULT_MODELS)
 
 
 class LLM(BaseModel):
     enabled: bool = True
-    provider: Literal["ollama", "anthropic"] = "ollama"
+    provider: Literal["ollama", "anthropic", "groq"] = "ollama"
     model: str | None = Field(default=None, description="Defaults per provider")
     base_url: str = Field(
         default_factory=lambda: os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         description="Ollama only",
     )
-    effort: Literal["low", "medium", "high"] = Field(default="low", description="Anthropic only")
+    effort: Literal["low", "medium", "high"] = Field(
+        default="low", description="Anthropic: thinking effort; Groq: reasoning effort"
+    )
     wake_command: str | None = Field(
         default=None,
         description="Ollama only: command that wakes a sleeping LLM server, "

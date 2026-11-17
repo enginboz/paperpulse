@@ -86,6 +86,13 @@ model = "mistral"
 # wake_command = "wakeonlan aa:bb:cc:dd:ee:ff"
 # wake_timeout = 120
 
+# Cloud: open models hosted by Groq, e.g. gpt-oss-120b. Under a second per paper; only
+# public abstracts are sent. Requires GROQ_API_KEY. The free tier allows roughly 5
+# assessments a minute; PaperPulse waits out short rate limits.
+# provider = "groq"
+# model = "openai/gpt-oss-120b"
+# effort = "low"              # reasoning effort
+
 # Cloud: Claude via the Anthropic API. Seconds per paper; only public abstracts are sent.
 # Requires `uv sync --extra anthropic` and ANTHROPIC_API_KEY.
 # provider = "anthropic"

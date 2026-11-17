@@ -28,7 +28,7 @@ The two rankings are merged with [reciprocal rank fusion](https://plg.uwaterloo.
 
 **An LLM judges each shortlisted paper on its own.** The best papers after fusion are assessed one at a time against a 1–5 rubric and your free-text preferences (for example, "original research over opinion pieces"). The model returns structured output: study type, a one-sentence rationale written before the score, and the relevance score. Judging papers individually, instead of asking for "the best 3 of these 20", keeps the task small enough for a local model, removes position bias, and makes every verdict cacheable and inspectable. Papers rated below a threshold are never shown, so a quiet week yields fewer picks rather than filler. If the LLM cannot be reached, the digest is ranked by retrieval alone, marked with `"llm_model": null`, and not saved, so its papers stay available for a run with the LLM.
 
-In an early spot check on five papers, a 3B model (`llama3.2`) rated everything 5/5 and mislabelled opinion pieces as systematic reviews, while `mistral` (7B) separated them correctly. Over [four weeks of evaluation](#results-so-far), however, both models picked the same number of relevant papers, and both pass most papers through. In a [comparison of small models](#small-models-on-a-4-gb-gpu), `qwen3:4b-instruct` was the only clearly selective one, and it runs on a 4 GB GPU in seconds per paper. `mistral` stays the default for now, with Claude as a much faster cloud option.
+In an early spot check on five papers, a 3B model (`llama3.2`) rated everything 5/5 and mislabelled opinion pieces as systematic reviews, while `mistral` (7B) separated them correctly. Over [four weeks of evaluation](#results-so-far), however, both models picked the same number of relevant papers, and both pass most papers through. In a [comparison of small models](#small-models-on-a-4-gb-gpu), `qwen3:4b-instruct` was the only clearly selective one, and it runs on a 4 GB GPU in seconds per paper. `mistral` stays the default for now. Two cloud providers are built in for speed: Claude via the Anthropic API, and open models such as `gpt-oss-120b` hosted by Groq, which answer in under a second and have a free tier. Only public titles and abstracts are sent.
 
 **Every pick explains itself.** The output records each paper's dense and keyword ranks, the topics behind them and the LLM assessment, plus run metadata (time window, models, candidate counts), so any selection can be understood and reproduced. Embeddings and assessments are cached, keyed by model, prompt version and profile, so re-runs only pay for what changed.
 
@@ -77,6 +77,7 @@ Every ranking decision in PaperPulse (mistral over llama3.2, hybrid over dense, 
 paperpulse label                    # rate a pool of papers from title and abstract (y/n/skip/quit)
 paperpulse eval                     # compare ranking variants against your labels
 paperpulse eval --models mistral llama3.2   # compare LLMs on the same labels
+paperpulse eval --models ollama:qwen3:4b-instruct groq:openai/gpt-oss-120b   # across providers
 paperpulse eval --no-llm            # retrieval variants only, in seconds
 paperpulse eval --no-save           # quick check without writing a result file
 paperpulse labels export labels.jsonl
@@ -199,6 +200,7 @@ Besides the selected `papers`, every digest carries its `shortlist`: all papers 
 | `PAPERPULSE_DB` | Database path, if not `./paperpulse.db` |
 | `OLLAMA_BASE_URL` | Ollama server, if not `http://localhost:11434`; a server that sleeps can be woken with `[llm] wake_command`, e.g. a Wake-on-LAN call |
 | `ANTHROPIC_API_KEY` | Required for `provider = "anthropic"` |
+| `GROQ_API_KEY` | Required for `provider = "groq"` |
 
 ## Project structure
 
@@ -207,7 +209,7 @@ src/paperpulse/
 ├── sources/pubmed.py     # NCBI E-utilities client, incremental by Entrez date
 ├── store.py              # SQLite: papers, FTS5 index, embedding/assessment caches, runs
 ├── embeddings.py         # sentence-transformers wrapper with per-model cache
-├── llm.py                # Ollama and Anthropic providers behind one interface
+├── llm.py                # Ollama, Anthropic and Groq providers behind one interface
 ├── ranking/
 │   ├── filters.py        # publication type, title, abstract, recent picks
 │   ├── dense.py          # best-topic cosine similarity
